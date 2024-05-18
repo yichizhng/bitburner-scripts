@@ -355,6 +355,7 @@ export async function main(ns) {
           if (recalc) {
             ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
             [ht, _, gt, wt] = calcHGWThreads(ns, po, target, totalRam, BATCH_CAP - batches_launched, maxCores, minCores);
+            if (ht == 0) break schedule_loop;
             xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
               * ns.formulas.hacking.hackExp(so, po)
               + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
@@ -371,6 +372,7 @@ export async function main(ns) {
       minCores = Math.min(...ramMap.map(s => s[2]));
       totalRam = ramMap.reduce((a, b) => a + b[1], 0);
       [ht, _, gt, wt] = calcHGWThreads(ns, po, target, totalRam, BATCH_CAP - batches_launched, maxCores, minCores);
+      if (ht == 0) break;
       xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
         * ns.formulas.hacking.hackExp(so, po)
         + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
