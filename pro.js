@@ -174,6 +174,7 @@ function prepBatch(ns, target, ramMap) {
   let secIncrease = 0;
   while (gt > 0) {
     let availableThreads = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
+    if (secIncrease > 0) availableThreads--;
     let agt = Math.floor(availableThreads * ns.weakenAnalyze(1) / (0.004 + ns.weakenAnalyze(1)));
     if (agt < 1) break;
     // Find the biggest server with most cores
@@ -228,9 +229,11 @@ async function prep(ns, target) {
     ns.print(`Money: ${server.moneyAvailable} / ${server.moneyMax}`);
     let po = ns.getPlayer();
     let ramMap = getRamMap(ns);
-    let availableThreads = ramMap.reduce((a, b) => a + Math.floor(b / 1.75), 0);
+    let availableThreads = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
     if (prepBatch(ns, target, ramMap)) {
-      let threadsLeft = ramMap.reduce((a, b) => a + Math.floor(b / 1.75), 0);
+      let threadsLeft = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
+      ns.print(`threads used ${availableThreads - threadsLeft}`);
+      ns.print(`hack xp per thread: ${ns.formulas.hacking.hackExp(server, po)}`)
       po.exp.hacking += ns.formulas.hacking.hackExp(server, po) * (availableThreads - threadsLeft);
       po.skills.hacking = ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking);
       return po;
