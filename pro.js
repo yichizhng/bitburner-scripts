@@ -232,8 +232,6 @@ async function prep(ns, target) {
     let availableThreads = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
     if (prepBatch(ns, target, ramMap)) {
       let threadsLeft = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
-      ns.print(`threads used ${availableThreads - threadsLeft}`);
-      ns.print(`hack xp per thread: ${ns.formulas.hacking.hackExp(server, po)}`)
       po.exp.hacking += ns.formulas.hacking.hackExp(server, po) * (availableThreads - threadsLeft);
       po.skills.hacking = ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking);
       return po;
