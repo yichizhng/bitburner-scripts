@@ -168,11 +168,13 @@ function prepBatch(ns, target, ramMap) {
 
   server.hackDifficulty = server.minDifficulty;
   let gt = ns.formulas.hacking.growThreads(server, ns.getPlayer(), server.moneyMax);
+  let ogt = gt;
   ns.print(`${gt} grow threads needed for max money`);
+
+  let secIncrease = 0;
   while (gt > 0) {
     let availableThreads = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
     let agt = Math.floor(availableThreads * ns.weakenAnalyze(1) / (0.004 + ns.weakenAnalyze(1)));
-    ns.print(`Available threads: ${availableThreads}; launching ${agt} grow threads`)
     if (agt < 1) break;
     // Find the biggest server with most cores
     let gs = ramMap.filter(x => x[1] >= 1.75).reduce((a, b) => {
@@ -182,20 +184,26 @@ function prepBatch(ns, target, ramMap) {
     });
     if (!gs) break;
     agt = Math.min(Math.ceil(agt / ((15 + gs[2]) / 16)), Math.floor(gs[1] / 1.75));
-    ns.print(`Launching ${agt} grow threads on ${gs[0]}`);
     let pid = ns.exec('grow-once.js', gs[0], { threads: agt, temporary: true }, target, ns.getWeakenTime(target) - ns.getGrowTime(target));
     if (!pid) {
-      ns.print('Failed to launch grow threads; is another script using ram?');
+      ns.print('WARNING: Failed to launch grow threads; is another script using ram?');
       return false;
     }
     gs[1] -= agt * 1.75;
-    let wt = Math.ceil((0.004 * agt) / ns.weakenAnalyze(1));
+    gt -= agt;
+    secIncrease += 0.004 * agt;
+
+    // Allowing split grows is more efficient for small servers than launching a separate
+    // weaken for each grow
+    let wt = Math.floor((secIncrease) / ns.weakenAnalyze(1));
+    if (gt == 0) wt++;
     if (!launchWeaken(ns, target, wt, ramMap, 1, [])) {
-      ns.print(`Failed to launch ${wt} weaken threads; is another script using ram?`);
+      ns.print(`WARNING: Failed to launch ${wt} weaken threads`);
       return false;
     }
+    secIncrease -= ns.weakenAnalyze(wt);
   }
-  
+  ns.print(`Launched ${ogt-gt} grow threads`);
   return gt <= 0;
 }
 
