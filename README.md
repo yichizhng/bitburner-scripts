@@ -1,1 +1,9 @@
 # bitburner-scripts
+
+A collection of some bitburner scripts
+
+## noob.js
+A non-formulas HWGW shotgun batcher. Optimized for low ram cases, but does fine at high ram as well.
+
+## pro.js
+A formulas HGW batcher with lots of fancy features.
