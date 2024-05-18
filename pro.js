@@ -313,6 +313,8 @@ export async function main(ns) {
             break schedule_loop;
           }
 
+          b++;
+          batches_launched++;
           po.exp.hacking += xp_per_batch;
           let recalc = false;
           if (ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking) != po.skills.hacking) {
@@ -328,8 +330,6 @@ export async function main(ns) {
             }
             so.hackDifficulty = so.minDifficulty;
           }
-          b++;
-          batches_launched++;
           if (batches_launched >= BATCH_CAP) {
             ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
             ns.print(`Stopping due to script limit`);
@@ -372,8 +372,9 @@ export async function main(ns) {
         + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
     }
     await 0; await 0; await ns.asleep(ns.getWeakenTime(target));
+    server = ns.getServer(target);
     if (server.hackDifficulty > server.minDifficulty) {
-      ns.print('ERROR: Server above min diff');
+      ns.print(`ERROR: Server above min diff ${server.hackDifficulty} / ${server.minDifficulty}`);
       ns.tprint('ERROR: Server above min diff');
     }
     if (server.moneyAvailable < server.moneyMax) {
