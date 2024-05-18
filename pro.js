@@ -175,7 +175,8 @@ function prepBatch(ns, target, ramMap) {
   while (gt > 0) {
     let availableThreads = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
     if (secIncrease > 0) availableThreads--;
-    let agt = Math.floor(availableThreads * ns.weakenAnalyze(1) / (0.004 + ns.weakenAnalyze(1)));
+    let agt = Math.min(Math.ceil(gt),
+      Math.floor(availableThreads * ns.weakenAnalyze(1) / (0.004 + ns.weakenAnalyze(1))));
     if (agt < 1) break;
     // Find the biggest server with most cores
     let gs = ramMap.filter(x => x[1] >= 1.75).reduce((a, b) => {
@@ -210,7 +211,7 @@ function prepBatch(ns, target, ramMap) {
       return false;
     }
   }
-  ns.print(`Launched ${ogt-gt} grow threads`);
+  ns.print(`Launched ${ogt - gt} grow threads`);
   return gt <= 0;
 }
 
@@ -314,7 +315,7 @@ export async function main(ns) {
           b++;
           batches_launched++;
           if (batches_launched % 1000 == 0) {
-             await 0; await 0;
+            await 0; await 0;
             // await ns.asleep(0);
           }
           po.exp.hacking += xp_per_batch;
