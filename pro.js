@@ -196,12 +196,18 @@ function prepBatch(ns, target, ramMap) {
     // Allowing split grows is more efficient for small servers than launching a separate
     // weaken for each grow
     let wt = Math.floor((secIncrease) / ns.weakenAnalyze(1));
-    if (gt == 0) wt++;
     if (!launchWeaken(ns, target, wt, ramMap, 1, [])) {
       ns.print(`WARNING: Failed to launch ${wt} weaken threads`);
       return false;
     }
     secIncrease -= ns.weakenAnalyze(wt);
+  }
+  if (secIncrease > 0) {
+    let wt = Math.ceil((secIncrease) / ns.weakenAnalyze(1));
+    if (!launchWeaken(ns, target, wt, ramMap, 1, [])) {
+      ns.print(`WARNING: Failed to launch ${wt} weaken threads`);
+      return false;
+    }
   }
   ns.print(`Launched ${ogt-gt} grow threads`);
   return gt <= 0;
