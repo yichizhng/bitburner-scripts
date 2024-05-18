@@ -231,7 +231,7 @@ async function prep(ns, target) {
     let availableThreads = ramMap.reduce((a, b) => a + Math.floor(b / 1.75), 0);
     if (prepBatch(ns, target, ramMap)) {
       let threadsLeft = ramMap.reduce((a, b) => a + Math.floor(b / 1.75), 0);
-      po.exp.hacking += ns.formulas.hacking.hackExp(target, po) * (availableThreads - threadsLeft);
+      po.exp.hacking += ns.formulas.hacking.hackExp(server, po) * (availableThreads - threadsLeft);
       po.skills.hacking = ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking);
       return po;
     }
@@ -286,7 +286,6 @@ export async function main(ns) {
       let b = 0;
       let growServers = ramMap.filter(s => s[2] == maxCores && s[1] >= 1.75 * gt);
       if (growServers.length == 0 && maxCores == minCores) {
-        ns.print('Ran out of servers to schedule grow on');
         break;
       }
       for (let growServer of growServers) {
@@ -357,6 +356,7 @@ export async function main(ns) {
           }
         }
       }
+      ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
       ns.print(`Changing any remaining ram with ${maxCores} cores to 1 core and recalcing batch size`);
       ramMap = ramMap.filter(s => s[1] >= 1.75);
       growServers.forEach(s => { s[2] = 1 });
