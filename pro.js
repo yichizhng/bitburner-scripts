@@ -313,6 +313,10 @@ export async function main(ns) {
 
           b++;
           batches_launched++;
+          if (batches_launched % 1000 == 0) {
+             await 0; await 0;
+            // await ns.asleep(0);
+          }
           po.exp.hacking += xp_per_batch;
           let recalc = false;
           if (ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking) != po.skills.hacking) {
@@ -337,6 +341,7 @@ export async function main(ns) {
           // of those changed, trigger a recalc
           if (ramMap.some(s => s[1] < 1.75)) {
             ramMap = ramMap.filter(s => s[1] >= 1.75);
+            if (ramMap.length == 0) break;
             let nmaxCores = Math.max(...ramMap.map(s => s[2]));
             let nminCores = Math.min(...ramMap.map(s => s[2]));
             totalRam = ramMap.reduce((a, b) => a + b[1], 0);
@@ -360,6 +365,7 @@ export async function main(ns) {
       ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
       ns.print(`Changing any remaining ram with ${maxCores} cores to 1 core and recalcing batch size`);
       ramMap = ramMap.filter(s => s[1] >= 1.75);
+      if (ramMap.length == 0) break;
       growServers.forEach(s => { s[2] = 1 });
       maxCores = Math.max(...ramMap.map(s => s[2]));
       minCores = Math.min(...ramMap.map(s => s[2]));
