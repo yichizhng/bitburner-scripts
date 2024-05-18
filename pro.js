@@ -131,7 +131,7 @@ function launchWeaken(ns, target, threads, ramMap, minCores, pids) {
     // Prefer uncored ram for weaken
     let wsc = ramMap.filter(x => x[1] >= 1.75 && x[2] >= minCores);
     if (wsc.length == 0) return false;
-    let ws = wsc.reduce((a, b) => b[2] > a[2] ? a : b);
+    let ws = wsc.reduce((a, b) => a[2] > b[2] ? b : a);
     if (!ws) return false;
     let at = Math.min(Math.ceil(threads), Math.floor(ws[1] / 1.75));
     if (pids) {
