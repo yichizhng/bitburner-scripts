@@ -282,11 +282,14 @@ export async function main(ns) {
     let xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
       * ns.formulas.hacking.hackExp(so, po)
       + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
+    let money_per_batch = so.moneyMax * ht * ns.formulas.hacking.hackPercent(so, po);
+    let expected_profit = 0;
 
     let batches_launched = 0;
+    let w = ns.asleep(0);
     schedule_loop: while (batches_launched < BATCH_CAP) {
       let b = 0;
-      let growServers = ramMap.filter(s => s[2] == maxCores && s[1] >= 1.75 * gt);
+      let growServers = ramMap.filter(s => s[2] == maxCores);
       if (growServers.length == 0 && maxCores == minCores) {
         break;
       }
@@ -311,12 +314,18 @@ export async function main(ns) {
             ns.print(`Out of RAM`);
             break schedule_loop;
           }
+          expected_profit += money_per_batch;
 
           b++;
           batches_launched++;
           if (batches_launched % 1000 == 0) {
-            await 0; await 0;
-            // await ns.asleep(0);
+            await w;
+            w = ns.asleep(0);
+            let s = ns.getServer(target);
+            if (s.hackDifficulty > s.minDifficulty || s.moneyAvailable < s.moneyMax) {
+              ns.print('stopped scheduling due to desync')
+              break schedule_loop;
+            }
           }
           po.exp.hacking += xp_per_batch;
           let recalc = false;
@@ -330,8 +339,16 @@ export async function main(ns) {
             if (ngt > gt) {
               ns.print(`Predicted desync after ${batches_launched} batches; recalculating batch size`);
               recalc = true;
+            } else {
+              // Update xp_per_batch anyway in case hackChance changed
+              xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
+              * ns.formulas.hacking.hackExp(so, po)
+              + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
+              money_per_batch = so.moneyMax * ht * ns.formulas.hacking.hackPercent(so, po);
             }
             so.hackDifficulty = so.minDifficulty;
+
+            
           }
           if (batches_launched >= BATCH_CAP) {
             ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
@@ -360,9 +377,14 @@ export async function main(ns) {
             xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
               * ns.formulas.hacking.hackExp(so, po)
               + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
+            money_per_batch = so.moneyMax * ht * ns.formulas.hacking.hackPercent(so, po);
             continue schedule_loop;
           }
         }
+      }
+      if (b == 0 && maxCores == minCores) {
+        ns.print('Batch launching stalled');
+        break;
       }
       ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
       ns.print(`Changing any remaining ram with ${maxCores} cores to 1 core and recalcing batch size`);
@@ -378,7 +400,11 @@ export async function main(ns) {
         * ns.formulas.hacking.hackExp(so, po)
         + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
     }
-    await 0; await 0; await ns.asleep(ns.getWeakenTime(target));
+	ns.print(`Expected profit: \$${ns.formatNumber(expected_profit)}`);
+  let sm = ns.getRunningScript().onlineMoneyMade;
+    await w; await ns.asleep(ns.getWeakenTime(target));
+  let em = ns.getRunningScript().onlineMoneyMade;
+  ns.print(`Actual profit: \$${em-sm}`);
     server = ns.getServer(target);
     if (server.hackDifficulty > server.minDifficulty) {
       ns.print(`ERROR: Server above min diff ${server.hackDifficulty} / ${server.minDifficulty}`);
