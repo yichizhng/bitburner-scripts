@@ -17,6 +17,32 @@ function getAllServers(ns) {
 }
 
 /** @param {NS} ns */
+function bnHackingMultiplier(ns) {
+	let mults = 
+	[,  // 0
+	1,  // 1
+	0.8,  // 2
+	0.8,  // 3
+	1,  // 4
+	1,  // 5
+	0.35,  // 6 
+	0.35,  // 7
+	1,  // 8
+	0.5,  // 9
+	0.35,  // 10
+	0.6,  // 11
+	,  // 12
+	0.25,  // 13
+	0.4  // 14
+	]
+	if (ns.getResetInfo().currentNode == 12) {
+		let bn12level = 1 + ns.getResetInfo().ownedSF.get(12)??0;
+		return Math.pow(1.02, -bn12level);
+	}
+	return mults[ns.getResetInfo().currentNode];
+}
+
+/** @param {NS} ns */
 function pickTarget(ns) {
   if (ns.getHackingLevel() < 200) return 'joesguns';
   let po = ns.getPlayer();
@@ -234,7 +260,7 @@ async function prep(ns, target) {
     if (prepBatch(ns, target, ramMap)) {
       let threadsLeft = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
       po.exp.hacking += ns.formulas.hacking.hackExp(server, po) * (availableThreads - threadsLeft);
-      po.skills.hacking = ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking * ns.getBitNodeMultipliers().HackingLevelMultiplier);
+      po.skills.hacking = ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking * bnhackingmult);
       return po;
     }
     await 0; await 0; await ns.asleep(ns.getWeakenTime(target));
@@ -277,6 +303,7 @@ export async function main(ns) {
     let minCores = Math.min(...ramMap.map(s => s[2]));
     let totalRam = ramMap.reduce((a, b) => a + b[1], 0);
     let [ht, _, gt, wt] = calcHGWThreads(ns, po, target, totalRam, BATCH_CAP, maxCores, minCores);
+		let bnhackingmult = bnHackingMultiplier(ns);
     let so = ns.getServer(target);
     so.hackDifficulty = so.minDifficulty;
     let xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
@@ -331,8 +358,8 @@ export async function main(ns) {
           po.exp.hacking += xp_per_batch;
           let recalc = false;
           if (ns.formulas.skills.calculateSkill(po.exp.hacking,
-            po.mults.hacking * ns.getBitNodeMultipliers().HackingLevelMultiplier) != po.skills.hacking) {
-            po.skills.hacking = ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking * ns.getBitNodeMultipliers().HackingLevelMultiplier);
+            po.mults.hacking * bnhackingmult) != po.skills.hacking) {
+            po.skills.hacking = ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking * bnhackingmult);
             // Only recalculate batch size if it would desync; this is theoretically not optimal, but who cares?
             let nhp = ns.formulas.hacking.hackPercent(so, po);
             so.hackDifficulty += 0.002 * ht;
@@ -418,4 +445,4 @@ export async function main(ns) {
     }
     po = ns.getPlayer();
   }
-}
+} 
