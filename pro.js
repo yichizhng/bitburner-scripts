@@ -9,7 +9,7 @@
 // Uses hacknet servers, and consumes all available ram on home; again, the needed
 // changes to avoid that are left as an exercise for the reader.
 
-const BATCH_CAP = 100000;
+const BATCH_CAP = 300000;
 
 /** @param {NS} ns */
 function getAllServers(ns) {
@@ -106,7 +106,7 @@ function calcHGWThreads(ns, po, targetServer, totalRam, batchLimit = 100000, gro
  * free ram.
  */
 function getRamMap(ns) {
-	return getAllServers(ns).map(ns.getServer)
+	return /*getAllServers(ns)*/ ['home'].map(ns.getServer)
 		.filter(x => x.maxRam && x.hasAdminRights)
 		.map(x => [x.hostname, x.maxRam - x.ramUsed, x.cpuCores])
 		.sort((a, b) => a[1] - b[1]);
@@ -274,13 +274,13 @@ async function prep(ns, target) {
 export async function main(ns) {
 	ns.disableLog('ALL');
 	ns.write('hack-once.js',
-		'export let main = (n,a=n.args) => (n.disableLog("ALL"), a[0] && n.hack(a[0], {additionalMsec: a[1]}))', 'w');
+		'export let main = (n,a=n.args) => (a[0] && n.hack(a[0], {additionalMsec: a[1]}))', 'w');
 	ns.write('hack-half.js',
-		'export let main = (n,a=n.args) => (n.disableLog("ALL"), a[0] && n.hack(a[0], {additionalMsec: a[1], threads: 0.5}))', 'w');
+		'export let main = (n,a=n.args) => (a[0] && n.hack(a[0], {additionalMsec: a[1], threads: 0.5}))', 'w');
 	ns.write('grow-once.js',
-		'export let main = (n,a=n.args) => (n.disableLog("ALL"), a[0] && n.grow(a[0], {additionalMsec: a[1]}))', 'w');
+		'export let main = (n,a=n.args) => (a[0] && n.grow(a[0], {additionalMsec: a[1]}))', 'w');
 	ns.write('weaken-once.js',
-		'export let main = (n,a=n.args[0]) => (n.disableLog("ALL"), a && n.weaken(a))', 'w');
+		'export let main = (n,a=n.args[0]) => (a && n.weaken(a))', 'w');
 	const scripts = ['hack-once.js', 'hack-half.js', 'grow-once.js', 'weaken-once.js']
 	// Force module compilation
 	let pids = [ns.run(scripts[0]), ns.run(scripts[1]), ns.run(scripts[2]), ns.run(scripts[3])];
@@ -320,6 +320,7 @@ export async function main(ns) {
 
 		let batches_launched = 0;
 		let w = ns.asleep(0);
+		let cycleTime = ns.getWeakenTime(target);
 		schedule_loop: while (batches_launched < BATCH_CAP) {
 			let b = 0;
 			let growServers = ramMap.filter(s => s[2] == maxCores);
@@ -354,8 +355,8 @@ export async function main(ns) {
 					if (batches_launched % 1000 == 0) {
 						await w;
 						w = ns.asleep(0);
-						let s = ns.getServer(target);
-						if (s.hackDifficulty > s.minDifficulty || s.moneyAvailable < s.moneyMax) {
+						if (ns.getWeakenTime(target) != cycleTime) {
+							// > could work, but then you need additionalMsec on weaken
 							ns.print('stopped scheduling due to desync')
 							break schedule_loop;
 						}
@@ -374,7 +375,6 @@ export async function main(ns) {
 							ns.print(`Predicted desync after ${batches_launched} batches; recalculating batch size`);
 							recalc = true;
 						} else {
-							ns.print(`No desync expected ${ngt} / ${gt}`);
 							// Update xp_per_batch anyway in case hackChance changed
 							xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
 								* ns.formulas.hacking.hackExp(so, po)
