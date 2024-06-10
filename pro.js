@@ -106,7 +106,7 @@ function calcHGWThreads(ns, po, targetServer, totalRam, batchLimit = 100000, gro
  * free ram.
  */
 function getRamMap(ns) {
-	return /*getAllServers(ns)*/ ['home'].map(ns.getServer)
+	return getAllServers(ns).map(ns.getServer)
 		.filter(x => x.maxRam && x.hasAdminRights)
 		.map(x => [x.hostname, x.maxRam - x.ramUsed, x.cpuCores])
 		.sort((a, b) => a[1] - b[1]);
@@ -338,12 +338,14 @@ export async function main(ns) {
 					if (!gpid) {
 						fail = true;
 					}
+					pids.push(gpid);
 					growServer[1] -= 1.75 * gt;
 					if (!launchWeaken(ns, target, wt, ramMap, minCores, pids)) {
 						fail = true;
 					}
 					if (fail) {
 						pids.map(ns.kill);
+						ns.kill(gpid);
 						ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
 						ns.print(`Out of RAM`);
 						break schedule_loop;
@@ -371,7 +373,7 @@ export async function main(ns) {
 						so.hackDifficulty += 0.002 * ht;
 						let ngp = ns.formulas.hacking.growPercent(so, 1, po, maxCores);
 						let ngt = Math.log(1 - ht * nhp) / -Math.log(ngp);
-						if (ngt > gt) {
+						if ((ngt > gt) || (nhp >= 1)) {
 							ns.print(`Predicted desync after ${batches_launched} batches; recalculating batch size`);
 							recalc = true;
 						} else {
