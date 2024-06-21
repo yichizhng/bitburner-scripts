@@ -9,7 +9,7 @@
 // Uses hacknet servers, and consumes all available ram on home; again, the needed
 // changes to avoid that are left as an exercise for the reader.
 
-const BATCH_CAP = 300000;
+const BATCH_CAP = 100000;
 
 /** @param {NS} ns */
 function getAllServers(ns) {
@@ -50,10 +50,11 @@ function pickTarget(ns) {
 		.map(ns.getServer)
 		.filter(s => s.moneyMax && s.hasAdminRights)
 		.map(s => {
+			// Prefer prepped servers to avoid swapping targets too frequently
+      let preppedBonus = s.hackDifficulty == s.minDifficulty ? 1.2 : 1;
 			s.hackDifficulty = s.minDifficulty;
 			return [s.hostname,
-			// Prefer prepped servers to avoid swapping targets too frequently
-			(s.hackDifficulty == s.minDifficulty ? 1.2 : 1) *
+			preppedBonus *
 			ns.formulas.hacking.hackChance(s, po) *
 			ns.formulas.hacking.hackPercent(s, po) *
 			s.moneyMax / ns.formulas.hacking.weakenTime(s, po)];
@@ -79,7 +80,7 @@ function calcHGWThreads(ns, po, targetServer, totalRam, batchLimit = 100000, gro
 	so.moneyAvailable = so.moneyMax;
 	let hp = ns.formulas.hacking.hackPercent(so, po);
 	for (let ht = 1; ht * hp < 1; ++ht) {
-		so.hackDifficulty += 0.002 * ht; // ns.hackAnalyzeSecurity(ht);
+		so.hackDifficulty = so.minDifficulty + 0.002 * ht; // ns.hackAnalyzeSecurity(ht);
 		// so.moneyAvailable *= (1 - ht * hp);
 		let gp = ns.formulas.hacking.growPercent(so, 1, po, growCores);
 		let gt = Math.ceil(Math.log(1 - ht * hp) / -Math.log(gp));
@@ -95,7 +96,20 @@ function calcHGWThreads(ns, po, targetServer, totalRam, batchLimit = 100000, gro
 		}
 		if (wt - best[3] > 2) break;
 	}
-	// TODO: account for hp >= 1 (use fractional hack)
+  {  // but what if we hacked 100%
+    let ht = Math.ceil(1/hp);
+    so.hackDifficulty = so.minDifficulty + 0.002 * ht;
+    so.moneyAvailable = 0;
+    let gt = ns.formulas.hacking.growThreads(so, po, so.moneyMax);
+    let wt = Math.ceil((/*ns.hackAnalyzeSecurity(ht) + ns.growthAnalyzeSecurity(gt)*/
+			0.002 * ht + 0.004 * gt) / ns.weakenAnalyze(1, weakenCores));
+    let tb = Math.min(Math.floor(totalRam / (1.7 * ht + 1.75 * (gt + wt))), batchLimit);
+		let tht = tb * ht;
+		if (tht > best_tht) {
+			best_tht = tht;
+      ns.print(best)
+		}
+  }
 	return best;
 }
 
@@ -321,6 +335,7 @@ export async function main(ns) {
 		let batches_launched = 0;
 		let w = ns.asleep(0);
 		let cycleTime = ns.getWeakenTime(target);
+    let cycleStartTime = Date.now();
 		schedule_loop: while (batches_launched < BATCH_CAP) {
 			let b = 0;
 			let growServers = ramMap.filter(s => s[2] == maxCores);
@@ -370,7 +385,7 @@ export async function main(ns) {
 						po.skills.hacking = ns.formulas.skills.calculateSkill(po.exp.hacking, po.mults.hacking * bnhackingmult);
 						// Only recalculate batch size if it would desync; this is theoretically not optimal, but who cares?
 						let nhp = ns.formulas.hacking.hackPercent(so, po);
-						so.hackDifficulty += 0.002 * ht;
+						so.hackDifficulty = so.minDifficulty + 0.002 * ht;
 						let ngp = ns.formulas.hacking.growPercent(so, 1, po, maxCores);
 						let ngt = Math.log(1 - ht * nhp) / -Math.log(ngp);
 						if ((ngt > gt) || (nhp >= 1)) {
@@ -441,7 +456,9 @@ export async function main(ns) {
 		let sm = ns.getRunningScript().onlineMoneyMade;
 		await w; await ns.asleep(ns.getWeakenTime(target));
 		let em = ns.getRunningScript().onlineMoneyMade;
+    let cycleEndTime = Date.now();
 		ns.print(`Actual profit: \$${ns.formatNumber(em - sm)}`);
+    ns.print(`Money rate: \$${ns.formatNumber(1000*(em - sm)/(cycleEndTime-cycleStartTime))}/s`);
 		server = ns.getServer(target);
 		if (server.hackDifficulty > server.minDifficulty) {
 			ns.print(`ERROR: Server above min diff ${server.hackDifficulty} / ${server.minDifficulty}`);
