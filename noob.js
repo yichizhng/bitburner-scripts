@@ -153,10 +153,10 @@ function getHWGWThreads(ns, target) {
       let batches_launched = 0;
       while (true) {
         let pids = [
-          launchHack(ns, target, ht, ramMap, true),
-          launchWeaken(ns, target, w1t, ramMap, true),
-          launchGrow(ns, target, gt, ramMap, true),
-          launchWeaken(ns, target, w2t, ramMap, true)
+          launchHack(ns, target, hackthreads, ramMap, true),
+          launchWeaken(ns, target, w1threads, ramMap, true),
+          launchGrow(ns, target, growthreads, ramMap, true),
+          launchWeaken(ns, target, w2threads, ramMap, true)
         ];
         if (pids.some(x => !x)) break;
         batches_launched++;
