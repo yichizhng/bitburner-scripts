@@ -107,6 +107,7 @@ function calcHGWThreads(ns, po, targetServer, totalRam, batchLimit = 100000, gro
 		let tht = tb * ht;
 		if (tht > best_tht) {
 			best_tht = tht;
+      best = [ht, 0, gt, wt];
       ns.print(best)
 		}
   }
@@ -137,10 +138,6 @@ function getRamMap(ns) {
  */
 function launchHack(ns, target, threads, ramMap, pids) {
 	let script = 'hack-once.js'
-	if (threads == 0.5) {
-		script = 'hack-half.js';
-		threads = 1;
-	}
 	// Prefer uncored ram for hack
 	let hsc = ramMap.filter(x => x[1] >= threads * 1.7);
 	if (hsc.length == 0) return false;
@@ -289,8 +286,6 @@ export async function main(ns) {
 	ns.disableLog('ALL');
 	ns.write('hack-once.js',
 		'export let main = (n,a=n.args) => (a[0] && n.hack(a[0], {additionalMsec: a[1]}))', 'w');
-	ns.write('hack-half.js',
-		'export let main = (n,a=n.args) => (a[0] && n.hack(a[0], {additionalMsec: a[1], threads: 0.5}))', 'w');
 	ns.write('grow-once.js',
 		'export let main = (n,a=n.args) => (a[0] && n.grow(a[0], {additionalMsec: a[1]}))', 'w');
 	ns.write('weaken-once.js',
