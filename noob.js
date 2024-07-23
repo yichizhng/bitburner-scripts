@@ -23,8 +23,8 @@ function pickTarget(ns) {
   let servers = getAllServers(ns).map(ns.getServer).filter(s => s.moneyMax && s.hasAdminRights);
   let best_metric = 0, best_target = '';
   for (let server of servers) {
-    let adjusted_hack_chance = Math.min(1, ns.hackAnalyzeChance(server.hostname) * server.hackDifficulty / server.minDifficulty);
-    let adjusted_hack_percent = Math.min(1, ns.hackAnalyze(server.hostname) * server.hackDifficulty / server.minDifficulty);
+    let adjusted_hack_chance = Math.min(1, ns.hackAnalyzeChance(server.hostname) * (100 - server.minDifficulty) / (100 - server.hackDifficulty));
+    let adjusted_hack_percent = Math.min(1, ns.hackAnalyze(server.hostname) * (100 - server.minDifficulty) / (100 - server.hackDifficulty));
     let time_mod = (200 + server.requiredHackingSkill * server.minDifficulty) / (50 + hl);
     let metric = server.moneyMax * adjusted_hack_percent * adjusted_hack_chance / time_mod;
 
@@ -94,7 +94,6 @@ async function prepServer(ns, target) {
       ramMap = getRamMap(ns);
       let gs = ramMap.at(-1);  // use the biggest server
       let agt = Math.min(gt, Math.floor(gs[1] / 1.75));
-      ns.print(agt);
       if (!agt) break;
       ns.exec('grow-once.js', gs[0], agt, target, ns.getWeakenTime(target) - ns.getGrowTime(target));
       gs[1] -= 1.75 * agt;
