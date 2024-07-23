@@ -212,6 +212,7 @@ function launchGrow(ns, target, threads, ramMap, dry) {
 function launchWeaken(ns, target, threads, ramMap, dry) {
   while (threads > 0) {
     let ws = ramMap.find(x => x[1] >= 1.75);
+    if (!ws) return 0;
     let at = Math.min(threads, Math.floor(ws[1] / 1.75));
     if (!ws) return 0;
     if (!dry) {
