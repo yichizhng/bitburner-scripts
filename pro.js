@@ -93,11 +93,10 @@ function calcHGWThreads(ns, po, targetServer, ramMap, batchLimit = 100000, growC
     {
       // Check that it is possible to schedule at least one batch
       //let ramMapCopy = ramMap.map(x => [...x]);
-      let ramMapCopy = getRamMap(ns);
+      let ramMapCopy = ramMap.map(x=>[...x])
       if (!(launchHack(ns, targetServer, ht, ramMapCopy) &&
         launchGrow(ns, targetServer, gt, ramMapCopy, growCores) &&
         launchWeaken(ns, targetServer, wt, ramMapCopy, weakenCores))) {
-        ns.print(`cannot schedule any ${ht}/${gt}/${wt} batches, stopping`);
         break;
       }
     }
