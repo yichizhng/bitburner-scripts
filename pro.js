@@ -57,7 +57,7 @@ function pickTarget(ns) {
       preppedBonus *
       ns.formulas.hacking.hackChance(s, po) *
       ns.formulas.hacking.hackPercent(s, po) *
-      s.moneyMax / ns.formulas.hacking.weakenTime(s, po)];
+      s.moneyMax / Math.max(4,ns.formulas.hacking.weakenTime(s, po))];
     })
     .reduce((a, b) => b[1] > a[1] ? b : a)[0];
 }
