@@ -60,7 +60,7 @@ function pickTarget(ns) {
       preppedBonus *
       ns.formulas.hacking.hackChance(s, po) *
       ns.formulas.hacking.hackPercent(s, po) *
-      s.moneyMax / Math.max(4,ns.formulas.hacking.weakenTime(s, po))];
+      s.moneyMax / Math.max(4, ns.formulas.hacking.weakenTime(s, po))];
     })
     .reduce((a, b) => b[1] > a[1] ? b : a)[0];
 }
@@ -90,20 +90,20 @@ function calcHGWThreads(ns, po, targetServer, ramMap, batchLimit = 100000, growC
     let gt = Math.ceil(Math.log(1 - ht * hp) / -Math.log(gp));
     let wt = Math.ceil((/*ns.hackAnalyzeSecurity(ht) + ns.growthAnalyzeSecurity(gt)*/
       0.002 * ht + 0.004 * gt) / ns.weakenAnalyze(1, weakenCores));
-	  
-	{
+    {
       // Check that it is possible to schedule at least one batch
-	  let ramMapCopy = ramMap.map(x=>[...x]);
-	  if (!(launchHack(ns, targetServer, ht, ramMapCopy) ||
-	        launchGrow(ns, targetServer, gt, ramMapCopy, growCores) ||
-			launchWeaken(ns, targetServer, wt, ramMapCopy, weakenCores))) {
+      //let ramMapCopy = ramMap.map(x => [...x]);
+      let ramMapCopy = getRamMap(ns);
+      if (!(launchHack(ns, targetServer, ht, ramMapCopy) &&
+        launchGrow(ns, targetServer, gt, ramMapCopy, growCores) &&
+        launchWeaken(ns, targetServer, wt, ramMapCopy, weakenCores))) {
         ns.print(`cannot schedule any ${ht}/${gt}/${wt} batches, stopping`);
-	    break;
-	  }
-	}
+        break;
+      }
+    }
 
     // Yes this is not exactly right, deal with it
-    let tb = Math.min(Math.floor(totalRam / (1.7 * ht + 1.75 * (gt + wt))), batchLimit);
+    let tb = Math.min(totalRam / (1.7 * ht + 1.75 * (gt + wt)), batchLimit);
     let tht = tb * ht;
     if (tht > best_tht) {
       best = [ht, 0, gt, wt];
@@ -195,7 +195,7 @@ function launchGrow(ns, target, threads, ramMap, minCores, pids) {
   let hs = hsc.reduce((a, b) => b[2] > a[2] ? a : b);
   if (!hs) return false;
   hs[1] -= 1.75 * threads;
-  if (!pids) return true;
+  if (!pids) { return true; }
   let pid = ns.exec(script, hs[0], { threads, temporary: true }, target, ns.getWeakenTime(target) - ns.getGrowTime(target), threads);
   if (pid) {
     pids.push(pid);
@@ -489,7 +489,9 @@ export async function main(ns) {
         }
       }
       if (b == 0 && maxCores == minCores) {
-        ns.print('Batch launching stalled');
+        ns.print(`Batch launching stalled with batch size ${[ht, gt, wt]}`);
+        let totalRam = ramMap.reduce((a, b) => a + b[1], 0);
+        ns.print(`Ram remaining: ${totalRam}`)
         break;
       }
       ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
