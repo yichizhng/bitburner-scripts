@@ -272,7 +272,7 @@ function prepBatch(ns, target, ramMap) {
       return a[1] > b[1] ? a : b;
     });
     if (!gs) break;
-    agt = Math.min(Math.ceil(gt / ((15 + gs[2]) / 16)), Math.floor(gs[1] / 1.75));
+    agt = Math.min(Math.ceil(agt / ((15 + gs[2]) / 16)), Math.floor(gs[1] / 1.75));
     let pid = ns.exec('grow-once.js', gs[0], { threads: agt, temporary: true }, target, ns.getWeakenTime(target) - ns.getGrowTime(target));
     if (!pid) {
       ns.print('WARNING: Failed to launch grow threads; is another script using ram?');
