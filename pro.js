@@ -513,6 +513,8 @@ export async function main(ns) {
       xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
         * ns.formulas.hacking.hackExp(so, po)
         + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
+      money_per_batch = so.moneyMax * ht * ns.formulas.hacking.hackPercent(so, po)
+        * ns.formulas.hacking.hackChance(so, po);
     }
     ns.print(`Expected profit: \$${ns.formatNumber(expected_profit)}`);
     let sm = ns.getRunningScript().onlineMoneyMade;
