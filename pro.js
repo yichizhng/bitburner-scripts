@@ -494,14 +494,22 @@ export async function main(ns) {
         break;
       }
       ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
-      ns.print(`Changing any remaining ram with ${maxCores} cores to 1 core and recalcing batch size`);
-      ramMap = ramMap.filter(s => s[1] >= 1.75);
-      if (ramMap.length == 0) break;
-      growServers.forEach(s => { s[2] = 1 });
-      maxCores = Math.max(...ramMap.map(s => s[2]));
-      minCores = Math.min(...ramMap.map(s => s[2]));
-      [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP - batches_launched, maxCores, minCores);
-      if (ht == 0) break;
+      do {
+        let nMaxCores = Math.max(1, ...ramMap.map(s => s[2]).filter(x => x != maxCores));
+        if (maxCores != minCores) {
+          ns.print(`Changing any remaining ram with ${maxCores} cores to ${nMaxCores}`);
+        } else {
+          break;
+        }
+
+        ramMap = ramMap.filter(s => s[1] >= 1.75);
+        if (ramMap.length == 0) break;
+        growServers.forEach(s => { s[2] = nMaxCores });
+        maxCores = Math.max(...ramMap.map(s => s[2]));
+        minCores = Math.min(...ramMap.map(s => s[2]));
+        growServers = ramMap.filter(s => s[2] == maxCores);
+        [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP - batches_launched, maxCores, minCores);
+      } while (ht == 0 && minCores != maxCores);
       xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
         * ns.formulas.hacking.hackExp(so, po)
         + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
