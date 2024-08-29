@@ -46,6 +46,33 @@ function bnHackingMultiplier(ns) {
 function pickTarget(ns) {
   if (ns.getHackingLevel() < 200) return 'joesguns';
   let po = ns.getPlayer();
+
+  /*
+  // print metrics and exit
+  ns.print(getAllServers(ns)
+    .map(ns.getServer)
+    .filter(s => s.moneyMax && s.hasAdminRights)
+    .map(s => {
+      if (ns.args[0] === s.hostname) {
+        return [s.hostname, Infinity]
+      }
+      let preppedBonus = s.hackDifficulty == s.minDifficulty ? 1.2 : 1;
+      s.hackDifficulty = s.minDifficulty;
+
+      let hp = ns.formulas.hacking.hackPercent(s, po);
+      let gp = ns.formulas.hacking.growPercent(s, 1, po, 1);
+      let gt = Math.ceil(Math.log(1 - hp) / -Math.log(gp));
+
+      return [s.hostname,
+      preppedBonus *
+      ns.formulas.hacking.hackChance(s, po) *
+      ns.formulas.hacking.hackPercent(s, po) *
+      s.moneyMax / 
+      ((1+gt) * Math.max(4, ns.formulas.hacking.weakenTime(s, po)))];
+    }).filter(x=>x[1]).sort((a,b)=>b[1]-a[1]).join('\n'));
+    ns.exit();
+    //*/
+
   return getAllServers(ns)
     .map(ns.getServer)
     .filter(s => s.moneyMax && s.hasAdminRights)
@@ -56,11 +83,18 @@ function pickTarget(ns) {
       // Prefer prepped servers to avoid swapping targets too frequently
       let preppedBonus = s.hackDifficulty == s.minDifficulty ? 1.2 : 1;
       s.hackDifficulty = s.minDifficulty;
+
+      // Adjustment for grow power
+      let hp = ns.formulas.hacking.hackPercent(s, po);
+      let gp = ns.formulas.hacking.growPercent(s, 1, po, 1);
+      let gt = Math.ceil(Math.log(1 - hp) / -Math.log(gp));
+
       return [s.hostname,
       preppedBonus *
       ns.formulas.hacking.hackChance(s, po) *
       ns.formulas.hacking.hackPercent(s, po) *
-      s.moneyMax / Math.max(4, ns.formulas.hacking.weakenTime(s, po))];
+      s.moneyMax /
+      ((1 + gt) * Math.max(4, ns.formulas.hacking.weakenTime(s, po)))];
     })
     .reduce((a, b) => b[1] > a[1] ? b : a)[0];
 }
@@ -92,8 +126,7 @@ function calcHGWThreads(ns, po, targetServer, ramMap, batchLimit = 100000, growC
       0.002 * ht + 0.004 * gt) / ns.weakenAnalyze(1, weakenCores));
     {
       // Check that it is possible to schedule at least one batch
-      //let ramMapCopy = ramMap.map(x => [...x]);
-      let ramMapCopy = ramMap.map(x=>[...x])
+      let ramMapCopy = ramMap.map(x => [...x])
       if (!(launchHack(ns, targetServer, ht, ramMapCopy) &&
         launchGrow(ns, targetServer, gt, ramMapCopy, growCores) &&
         launchWeaken(ns, targetServer, wt, ramMapCopy, weakenCores))) {
@@ -130,11 +163,20 @@ function calcHGWThreads(ns, po, targetServer, ramMap, batchLimit = 100000, growC
     let wt = Math.ceil((/*ns.hackAnalyzeSecurity(ht) + ns.growthAnalyzeSecurity(gt)*/
       0.002 * ht + 0.004 * gt) / ns.weakenAnalyze(1, weakenCores));
     let tb = Math.min(Math.floor(totalRam / (1.7 * ht + 1.75 * (gt + wt))), batchLimit);
+    {
+      // Check that it is possible to schedule at least one batch
+      let ramMapCopy = ramMap.map(x => [...x])
+      if (!(launchHack(ns, targetServer, ht, ramMapCopy) &&
+        launchGrow(ns, targetServer, gt, ramMapCopy, growCores) &&
+        launchWeaken(ns, targetServer, wt, ramMapCopy, weakenCores))) {
+        tb = 0;
+      }
+    }
     let tht = tb * ht;
     if (tht > best_tht) {
       best_tht = tht;
       best = [ht, 0, gt, wt];
-      ns.print(best)
+      ns.exit();
     }
   }
   return best;
@@ -148,7 +190,7 @@ function calcHGWThreads(ns, po, targetServer, ramMap, batchLimit = 100000, growC
  */
 function getRamMap(ns) {
   return getAllServers(ns).map(ns.getServer)
-    .filter(x => x.maxRam && x.hasAdminRights)
+    .filter(x => x.maxRam && x.hasAdminRights && !x.hostname.startsWith('hacknet'))
     .map(x => [x.hostname, x.maxRam - x.ramUsed, x.cpuCores])
     .sort((a, b) => a[1] - b[1]);
 }
@@ -261,7 +303,7 @@ function prepBatch(ns, target, ramMap) {
   let secIncrease = 0;
   while (gt > 0) {
     let availableThreads = ramMap.reduce((a, b) => a + Math.floor(b[1] / 1.75), 0);
-    if (secIncrease > 0) availableThreads--;
+    availableThreads -= Math.floor(secIncrease / ns.weakenAnalyze(1));
     let agt = Math.min(Math.ceil(gt),
       Math.floor(availableThreads * ns.weakenAnalyze(1) / (0.004 + ns.weakenAnalyze(1))));
     if (agt < 1) break;
@@ -367,6 +409,17 @@ export async function main(ns) {
     let minCores = Math.min(...ramMap.map(s => s[2]));
 
     let [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP, maxCores, minCores);
+    while (ht == 0) {
+      if (maxCores == minCores) break;
+      maxCores = Math.max(...ramMap.map(s => s[2]).filter(x => x < maxCores));
+      [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP, maxCores, minCores);
+    }
+    if (ht == 0) {
+      ns.print('Could not schedule any batches')
+      await 0; await 0;
+      await ns.asleep(ns.getWeakenTime(target));
+      continue;
+    }
     let bnhackingmult = bnHackingMultiplier(ns);
     let so = ns.getServer(target);
     so.hackDifficulty = so.minDifficulty;
@@ -406,7 +459,7 @@ export async function main(ns) {
           if (fail) {
             pids.map(ns.kill);
             ns.kill(gpid);
-            ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
+            // ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
             // Recalc and continue scheduling
             {
               [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP - batches_launched, maxCores, minCores);
@@ -418,11 +471,12 @@ export async function main(ns) {
                 * ns.formulas.hacking.hackChance(so, po)
             }
             continue schedule_loop;
-          }
-          expected_profit += money_per_batch;
+          } else {
+            expected_profit += money_per_batch;
 
-          b++;
-          batches_launched++;
+            b++;
+            batches_launched++;
+          }
           if (batches_launched % 1000 == 0) {
             await w;
             w = ns.asleep(0);
@@ -456,7 +510,7 @@ export async function main(ns) {
             so.hackDifficulty = so.minDifficulty;
           }
           if (batches_launched >= BATCH_CAP) {
-            ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
+            // ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
             ns.print(`Stopping due to script limit`);
             break schedule_loop;
           }
@@ -465,18 +519,18 @@ export async function main(ns) {
           if (ramMap.some(s => s[1] < 1.75)) {
             ramMap = ramMap.filter(s => s[1] >= 1.75);
             if (ramMap.length == 0) break;
-            let nmaxCores = Math.max(...ramMap.map(s => s[2]));
-            let nminCores = Math.min(...ramMap.map(s => s[2]));
-            if (nmaxCores != maxCores || nminCores != minCores) {
-              ns.print(`Ran out of cored or uncored memory after ${batches_launched} batches; recalculating batch size`);
-              maxCores = nmaxCores;
-              minCores = nminCores;
-              recalc = true;
-            }
+            recalc = true;
           }
           if (recalc) {
-            ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
+            // ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
+            maxCores = Math.max(...ramMap.map(s => s[2]));
+            minCores = Math.min(...ramMap.map(s => s[2]));
             [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP - batches_launched, maxCores, minCores);
+            while (ht == 0) {
+              if (maxCores == minCores) break;
+              maxCores = Math.max(...ramMap.map(s => s[2]).filter(x => x < maxCores));
+              [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP, maxCores, minCores);
+            }
             if (ht == 0) break schedule_loop;
             xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
               * ns.formulas.hacking.hackExp(so, po)
@@ -493,28 +547,21 @@ export async function main(ns) {
         ns.print(`Ram remaining: ${totalRam}`)
         break;
       }
-      ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
-      do {
-        let nMaxCores = Math.max(1, ...ramMap.map(s => s[2]).filter(x => x != maxCores));
-        if (maxCores != minCores) {
-          ns.print(`Changing any remaining ram with ${maxCores} cores to ${nMaxCores}`);
-        } else {
-          break;
-        }
-
-        ramMap = ramMap.filter(s => s[1] >= 1.75);
-        if (ramMap.length == 0) break;
-        growServers.forEach(s => { s[2] = nMaxCores });
-        maxCores = Math.max(...ramMap.map(s => s[2]));
-        minCores = Math.min(...ramMap.map(s => s[2]));
-        growServers = ramMap.filter(s => s[2] == maxCores);
-        [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP - batches_launched, maxCores, minCores);
-      } while (ht == 0 && minCores != maxCores);
+      // ns.print(`Launched ${b} HGW batches with ${ht}/${gt}/${wt} threads`);
+      ramMap = ramMap.filter(s => s[1] >= 1.75);
+      if (ramMap.length == 0) break;
+      maxCores = Math.max(...ramMap.map(s => s[2]));
+      minCores = Math.min(...ramMap.map(s => s[2]));
+      [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP - batches_launched, maxCores, minCores);
+      while (ht == 0) {
+        if (maxCores == minCores) break;
+        maxCores = Math.max(...ramMap.map(s => s[2]).filter(x => x < maxCores));
+        [ht, _, gt, wt] = calcHGWThreads(ns, po, target, ramMap, BATCH_CAP, maxCores, minCores);
+      }
+      if (ht == 0) break;
       xp_per_batch = (gt + wt + ht * ns.formulas.hacking.hackChance(so, po))
         * ns.formulas.hacking.hackExp(so, po)
         + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
-      money_per_batch = so.moneyMax * ht * ns.formulas.hacking.hackPercent(so, po)
-        * ns.formulas.hacking.hackChance(so, po);
     }
     ns.print(`Expected profit: \$${ns.formatNumber(expected_profit)}`);
     let sm = ns.getRunningScript().onlineMoneyMade;
