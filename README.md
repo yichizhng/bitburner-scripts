@@ -7,3 +7,9 @@ A non-formulas HWGW shotgun batcher. Optimized for low ram cases, but does fine 
 
 ## pro.js
 A formulas HGW batcher with lots of fancy features.
+
+## fuzzy.js
+A NS proxy for people who aren't very good at typing.
+
+## roulette.js
+A manual roulette cheat
