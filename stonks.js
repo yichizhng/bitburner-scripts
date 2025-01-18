@@ -1,25 +1,21 @@
 import { PrintTable, DefaultStyle } from 'tables.js'
 import { FormatMoney } from 'utils.js'
 
-// Drop-in replacement for https://github.com/xxxsinx/bitburner/blob/main/stonks.js
-// Parameters tuned with the help of Zoekeeper's stock market simulator.
-// Improvements estimated at 1.42x -> 1.72x per hour pre-4S, 1.62x -> 2.72x with 4S.
-
 let getTail = false
 const width = 1000
 const height = 740
-let g_tixMode = false; 					        // Global variable indicating if we have full 4S data or not (it is automatically 
+let g_tixMode = false; 					// Global variable indicating if we have full 4S data or not (it is automatically 
 // set/determined later in script no point changing the value here)
-let SHORTS = false;						          // Global to determine whether or not we have access to shorts (this is updated at the start of the script)
+let SHORTS = false;						// Global to determine whether or not we have access to shorts (this is updated at the start of the script)
 
-const LOG_SIZE = 15;					          // How many prices we keep in the log for blind/pre-4S trading for each symbol
-const BUY_TRIGGER = 0.12;				        // deviation from 0.5 (neutral) from which we start buying
-const SELL_TRIGGER = 0.07;				      // deviation from 0.5 (neutral) from which we start selling
-const TRANSACTION_COST = 100_000;		    // Cost of a stock transaction
+const LOG_SIZE = 15;					// How many prices we keep in the log for blind/pre-4S trading for each symbol
+const BUY_TRIGGER = 0.12;				// deviation from 0.5 (neutral) from which we start buying
+const SELL_TRIGGER = 0.07;				// deviation from 0.5 (neutral) from which we start selling
+const TRANSACTION_COST = 100_000;		// Cost of a stock transaction
 const MIN_TRANSACTION_SIZE = 5_000_000;	// Minimum amount of stocks to buy, we need this to keep the transaction cost in check
-const TIME_TRACKING = true;				      // True if we're benchmarking our performance
-const BENCH_TIME = 1000 * 60 * 60;		  // How long we wait before reporting profitability
-const MAGIC_NUMBER = 0.03;              // How quickly forecasts are updated in pre-4S mode
+const TIME_TRACKING = true;				// True if we're benchmarking our performance
+const BENCH_TIME = 1000 * 60 * 60;		// How long we wait before reporting profitability
+const MAGIC_NUMBER = 0.03;
 
 // Little representation of what this script does
 // | <---------------------------- SHORTS | LONGS ------------------------------>|
@@ -103,10 +99,7 @@ export async function main(ns) {
 
     // If it's been an hour, report progress
     if (TIME_TRACKING && performance.now() - started > BENCH_TIME) {
-      // Dump every stock
-      SellStonks(ns, longs, true);
-      let balance = ns.getServerMoneyAvailable('home');
-      //let balance = GetStonksBalance(ns);
+      let balance = GetStonksBalance(ns);
       ns.tprint('FAIL: It\'s been an hour and the current balance is ' + FormatMoney(ns, balance) + ' initial funds were ' + FormatMoney(ns, initialFunds) + ' profit: ' + (((balance - initialFunds) / initialFunds * 100)).toFixed(2) + '%');
 
       // Reset
