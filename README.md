@@ -13,3 +13,6 @@ A NS proxy for people who aren't very good at typing.
 
 ## roulette.js
 A manual roulette cheat
+
+## stonks.js
+Improvement on xsinx's stock script; still doesn't do flip cycle detection.
