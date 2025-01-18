@@ -1,6 +1,10 @@
 import { PrintTable, DefaultStyle } from 'tables.js'
 import { FormatMoney } from 'utils.js'
 
+// Drop-in replacement for https://github.com/xxxsinx/bitburner/blob/main/stonks.js
+// Parameters tuned with the help of Zoekeeper's stock market simulator.
+// Improvements estimated at 1.42x -> 1.72x per hour pre-4S, 1.62x -> 2.88x with 4S.
+
 let getTail = false
 const width = 1000
 const height = 740
