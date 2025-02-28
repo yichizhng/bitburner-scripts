@@ -82,7 +82,7 @@ async function prepServer(ns, target) {
     let ramMap = getRamMap(ns);
     let available_threads = ramMap.map(x => Math.floor(x[1] / 1.75)).reduce((x, y) => x + y);
 
-    let gt = Math.floor(0.95 * available_threads * ns.growthAnalyzeSecurity(1) / (ns.growthAnalyzeSecurity(1) + ns.weakenAnalyze(1)));
+    let gt = Math.floor(0.95 * available_threads * ns.weakenAnalyze(1) / (ns.growthAnalyzeSecurity(1) + ns.weakenAnalyze(1)));
     // TODO for someone who cares: if the server is minsec and there's ram left over
     // return instead of waiting
     if (gt > ns.growthAnalyze(target, server.moneyMax / server.moneyAvailable)) {
