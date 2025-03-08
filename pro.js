@@ -377,14 +377,17 @@ async function prep(ns, target) {
 export async function main(ns) {
   ns.disableLog('ALL');
   ns.write('hack-once.js',
-    'export let main = (n,a=n.args) => (a[0] && n.hack(a[0], {additionalMsec: a[1], threads: a[2]}))', 'w');
+    'export let main = (n,a=n.args) => (n.disableLog("ALL"), (a[0] && n.hack(a[0], {additionalMsec: a[1], threads: a[2]})))', 'w');
   ns.write('grow-once.js',
-    'export let main = (n,a=n.args) => (a[0] && n.grow(a[0], {additionalMsec: a[1]}))', 'w');
+    'export let main = (n,a=n.args) => (n.disableLog("ALL"), (a[0] && n.grow(a[0], {additionalMsec: a[1]})))', 'w');
   ns.write('weaken-once.js',
-    'export let main = (n,a=n.args[0]) => (a && n.weaken(a))', 'w');
+    'export let main = (n,a=n.args[0]) => (n.disableLog("ALL"), (a && n.weaken(a)))', 'w');
   const scripts = ['hack-once.js', 'hack-half.js', 'grow-once.js', 'weaken-once.js']
   // Force module compilation
-  let pids = [ns.run(scripts[0]), ns.run(scripts[1]), ns.run(scripts[2]), ns.run(scripts[3])];
+  let pids = [ns.exec(scripts[0],ns.hostname),
+              ns.exec(scripts[1],ns.hostname),
+              ns.exec(scripts[2],ns.hostname),
+              ns.exec(scripts[3],ns.hostname)];
   for (let pid of pids) {
     while (ns.isRunning(pid)) await ns.sleep(0);
   }
