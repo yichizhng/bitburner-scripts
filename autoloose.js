@@ -9,8 +9,8 @@ const BITMASKS =
     1260498195, 1415842264, -1897880285, -273553814, 1944522789,
     599390262, 1033445011, -937107540, 1168511328, 1158173073,
     894866539, 1807160375, -599589627, 498624852, -1271883029]
-const PLAYOUTS = 30000;
-const EXPLORATION_PARAMETER = 0.15;
+const PLAYOUTS = 10000;
+const EXPLORATION_PARAMETER = 0.22;
 
 /** @param {string[][]} board
   * @param {boolean} blackToPlay */
@@ -173,7 +173,7 @@ function fastPlayout(position, blackToPlay, history, ns) {
     blackToPlay = !blackToPlay;
     history.add(zobristHash(position, blackToPlay));
   }
-  return scoreTerminal(position);
+  return scoreTerminal(position, false);
 }
 
 function moveName(x, y) {
@@ -230,6 +230,23 @@ class MCGSNode {
   }
 }
 
+// Represents a terminal state; used for double pass
+class TerminalNode {
+  /**
+   * @param {string} key
+   * @param {Map<number, MCGSNode>} map
+   */
+  constructor(key, score, map) {
+    map.set(key, this);
+    this.U = score;
+    this.N = 1;
+    this.Q = score;
+    this.S = this.U;
+    this.SS = this.U
+  }
+  getcPUCT() { return 0; }
+}
+
 /** @param {string[] | string[][]} board */
 async function getMoves(board) {
   let b = board.map(x => [...x]);
@@ -241,11 +258,13 @@ async function getMoves(board) {
       await new Promise((resolve) => setTimeout(resolve, 0));
       // Terminate early if one move is overwhelmingly preferred, or already guaranteed to win
       let c = root.children.reduce((x, y) => y[1] > x[1] ? y : x);
-      if (c[1] > 0.9 * i || c[1] >= 0.5 * PLAYOUTS) {
-        break;
+      if (c[3]) {
+        if (c[1] > 0.9 * i || c[1] >= 0.5 * PLAYOUTS) {
+          break;
+        }
+        // Or if very winning or losing
+        if (root.Q > 20 || root.Q < 4) break;
       }
-      // Or if very winning or losing
-      if (root.Q > 20 || root.Q < 4) break;
     }
     let seen = new Set();
     seen.add(root.hash);
@@ -258,10 +277,24 @@ async function getMoves(board) {
       let nh = ln.children[0];
       for (let c of ln.children) {
         if (seen.has(c[0])) {
-          if (c[3] != null) {
-            continue;  // illegal due to superko
+          if (c[3] == null) {
+            let key = 't' + ln.hash;
+            ln.DP ??= [key, 0, null, null];
+            // the key is a string so it cannot be conflated with normal nodes
+            let child = map.get(key)
+            if (!map.has(key)) {
+              nn = scoreTerminal(ln.board, true);
+              child = new TerminalNode(key, nn, map);
+            }
+            let score = (ln.blackToPlay ? 1 : -1) * child.U;
+            if (score > bestScore) {
+              bestScore = score;
+              bestCount = 1;
+              nn = child.U;
+              nh = ln.DP;
+            }
           }
-          // consider pass as normal
+          continue;
         }
         let score = (ln.blackToPlay ? 1 : -1) *
           (map.get(c[0])?.Q ?? ln.Q) +
@@ -279,12 +312,11 @@ async function getMoves(board) {
           }
         }
       }
+      
       // Update node statistics
-      nh[1]++;
       ln.N++;
-      if (nh[0] === path.at(-2)?.hash) {
-        // double pass ends the game
-        nn = scoreTerminal(ln.board);
+      nh[1]++;
+      if (typeof nh[0] == 'string') {
         break;
       }
       seen.add(nh[0]);
@@ -302,6 +334,9 @@ async function getMoves(board) {
       for (let c of node.children) {
         s += c[1] * (map.get(c[0])?.Q ?? 0);
       }
+      if (node.DP) {
+        s += node.DP[1] * map.get(node.DP[0])?.U ?? 0;
+      }
       node.Q = (node.U + s) / node.N;
       node.S += nn;
       node.SS += nn ** 2;
@@ -311,32 +346,53 @@ async function getMoves(board) {
   for (let c of children) {
     c[2] = map.get(c[0])?.Q ?? 0;
   }
+  console.log(map.get(root.children[0][0]))
   return [root.Q, root.getcPUCT(), children];
 }
 
-function scoreTerminal(position) {
-  let liberties = getLibertiesLite(position);
+/** 
+ * @param {string[][]} position 
+ * @param {boolean} immediate if true, ignores liveness analysis
+ * */
+function scoreTerminal(position, immediate) {
   let bl = 0, wl = 0;
   let wc = 0, bc = 0, ec = 0;
   for (let x = 0; x < 5; ++x) {
     for (let y = 0; y < 5; ++y) {
       if (position[x][y] == 'X') {
         bc++;
-        if (liberties[x][y] > bl) bl = liberties[x][y];
       }
       if (position[x][y] == 'O') {
         wc++;
-        if (liberties[x][y] > wl) wl = liberties[x][y];
       }
       if (position[x][y] == '.') {
-        ec++;
+        let bn = false, wn = false;
+        for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          if (position[x+dx]?.[y+dy] == 'X') {
+            bn = true;
+          }
+          if (position[x+dx]?.[y+dy] == 'O') {
+            wn = true;
+          }
+        }
+        if (bn) {
+          if (wn) ec++;
+          else bl++;
+        } else {
+          if (wn) wl++;
+          else ec++;
+        }
       }
     }
   }
-  if (wl == bl) return bc;  // we assume it's seki or something
-  if (wl >= 2 && bl >= 2) return bc;  // same
+  if (immediate){
+    return bc + bl;
+  }
+
+  if (wl == bl) return bc + bl;  // we assume it's seki or something
+  if (wl >= 2 && bl >= 2) return bc + bl;  // same
   if (wl > bl) return 0;  // big loss
-  return wc + ec + bc;  // big win
+  return wc + ec + bc + bl + wl;  // big win
 }
 
 /** @param {NS} ns */
@@ -344,16 +400,16 @@ export async function main(ns) {
   ns.disableLog('asleep');
   ns.clearLog();
 
-  /* board testing
-  let notsekibord =
+  //* board testing
+  let sekibord =
     [
-      'XXXX.',
-      '.XXXX',
+      'XXXXX',
+      '.XXX.',
       'OOOXX',
-      'O.OXX',
+      'O.OX.',
       'OOOXX',
     ].map(x => [...x]);
-  let [q, s, moves] = await getMoves(ns.go.getBoardState());
+  let [q, s, moves] = await getMoves(sekibord);
   for (let m of moves) {
     ns.print(m[3] ? moveName(...m[3]) : 'pass');
     ns.print('N: ', m[1], ' Q: ', m[2])
@@ -363,10 +419,11 @@ export async function main(ns) {
   //*/
   let start = Date.now();
   l: for (let i = 0; i < 100; ++i) {
-    ns.go.resetBoardState('Illuminati', 5);
-    let firstMove = true;
+    do {
+      ns.go.resetBoardState('Illuminati', 5);
+    } while (ns.go.getBoardState()[2][2] != '.')
 
-    let lastMove = {};
+    let lastMove = await ns.go.makeMove(2,2);
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
         // end the game if there are no white stones left
@@ -377,11 +434,6 @@ export async function main(ns) {
       }
 
       let [q, s, moves] = await getMoves(ns.go.getBoardState());
-      if (firstMove && q < 9) {
-        ns.print('refusing to play position');
-        ns.print(ns.go.getBoardState().join('\n'));
-        break;
-      }
       ns.print('Q: ', q, ' S: ', s);
       let moved = false;
       let legalmoves = ns.go.analysis.getValidMoves();
@@ -403,7 +455,6 @@ export async function main(ns) {
         // ns.tprint(ns.go.getBoardState().join('\n'));
         lastMove = await ns.go.passTurn();
       }
-      firstMove = false;
     }
     await ns.asleep(0);
   }
