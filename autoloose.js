@@ -9,7 +9,7 @@ const BITMASKS =
     1260498195, 1415842264, -1897880285, -273553814, 1944522789,
     599390262, 1033445011, -937107540, 1168511328, 1158173073,
     894866539, 1807160375, -599589627, 498624852, -1271883029]
-const PLAYOUTS = 20000;
+const PLAYOUTS = 10000;
 
 /** @param {string[][]} board
   * @param {boolean} blackToPlay */
@@ -124,67 +124,67 @@ function getLibertiesLite(position) {
  * @param {boolean} blackToPlay
  * @param {Set<number>} history
  */
-function fastPlayout(position, blackToPlay, history) {
+function fastPlayout(position, blackToPlay, history, ns) {
   let lastPassed = false;
-  for (let i = 0; i < 20; ++i) {
+  for (let i = 0; i < 30; ++i) {
     // pick a non-dumb move at random, defaulting to pass
     // (a move is dumb if it is self-atari or fills in an eye for no reason)
     let np = position.map(x => [...x]);
     let liberties = getLibertiesLite(position);
-    let passed = true;
-    let consideredMoves = 0;
+    let moves = [];
+    let priorityMoves = [];
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
         let fillsEye = true;
-          for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            if (position[x + dx]?.[y + dy] == '.') {
+        //let isAtari = false;
+        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          if (liberties[x + dx]?.[y + dy] == 1) {
+            fillsEye = false;
+            /*
+            if ((position[x + dx]?.[y + dy] == 'X') ^ blackToPlay) {
+              isAtari = true;
+            }
+            */
+          }
+          if (position[x + dx]?.[y + dy] == '.') {
+            fillsEye = false; break;
+          }
+          if (position[x + dx]?.[y + dy] == 'O') {
+            if (blackToPlay) {
               fillsEye = false; break;
             }
-            if (position[x + dx]?.[y + dy] == 'O') {
-              if (blackToPlay) {
-                fillsEye = false; break;
-              } else {
-                if (liberties[x + dx][y + dy] == 1) {
-                  fillsEye = false; break;
-                }
-              }
-            }
-            if (position[x + dx]?.[y + dy] == 'X') {
-              if (blackToPlay) {
-                if (liberties[x + dx][y + dy] == 1) {
-                  fillsEye = false; break;
-                }
-              } else {
-                fillsEye = false; break;
-              }
+          }
+          if (position[x + dx]?.[y + dy] == 'X') {
+            if (!blackToPlay) {
+              fillsEye = false; break;
             }
           }
+        }
         if (fillsEye) continue;
         let nc = addMove(position, liberties, x, y, blackToPlay);
         if (!nc) continue;
         let hash = zobristHash(nc, !blackToPlay);
         if (history.has(hash)) continue;
-        let nliberties = getLibertiesLite(nc);
-        if (nliberties[x][y] == 1) continue;
 
-        consideredMoves++;
-        passed = false;
-        if (Math.random() * consideredMoves < 1) {
-          np = nc;
-        }
+        // if (isAtari && !blackToPlay) priorityMoves.push(np);
+        moves.push(nc);
       }
     }
-    if (passed) {
+    if (priorityMoves.length) {
+      lastPassed = false;
+      np = priorityMoves[Math.floor(Math.random() * priorityMoves.length)]
+    } else if (moves.length) {
+      lastPassed = false;
+      np = moves[Math.floor(Math.random() * moves.length)]
+    } else {
       if (lastPassed) break;
       lastPassed = true;
-    } else {
-      lastPassed = false;
     }
     position = np;
     blackToPlay = !blackToPlay;
     history.add(zobristHash(position, blackToPlay));
   }
-  let wc = 0, bc = 0;
+  let wc = 0, bc = 0, ec = 0;
   for (let x = 0; x < 5; ++x) {
     for (let y = 0; y < 5; ++y) {
       if (position[x][y] == 'X') {
@@ -193,9 +193,14 @@ function fastPlayout(position, blackToPlay, history) {
       if (position[x][y] == 'O') {
         wc++;
       }
+      if (position[x][y] == '.') {
+        ec++;
+      }
     }
   }
-  return bc > wc + 7.5 ? 1 : 0;
+  if (bc < 4) return 0;
+  if (wc < 4) return wc+ec+bc;
+  return bc;
 }
 
 function moveName(x, y) {
@@ -248,11 +253,22 @@ class MCGSNode {
     }
     map.set(this.hash, this);
 
-    // do a playout from this position
-    // it's actually probably better to do this from the loop.
-    this.U = fastPlayout(this.board, this.blackToPlay, history);
+    // result of the playout rooted at this position
+    this.U = fastPlayout(this.board, this.blackToPlay, history, this.ns);
     this.N = 1;
     this.Q = this.U;
+
+    // results of all playouts going through this position
+    this.PV = [this.U];
+  }
+
+  getcPUCT() {
+    let avg = 0;
+    for (let v of this.PV) avg += v;
+    avg /= this.PV.length;
+    let variance = 4;
+    for (let v of this.PV) variance += (v - avg) ** 2;
+    return (variance / (1 + this.PV.length)) ** 0.5;
   }
 }
 
@@ -269,6 +285,7 @@ async function getMoves(ns) {
     let seen = new Set();
     seen.add(root.hash);
     let path = [root];
+    let nn = null;
     // See https://github.com/lightvector/KataGo/blob/master/docs/GraphSearch.md
     // for the explanation of this algorithm.
     while (true) {
@@ -280,8 +297,8 @@ async function getMoves(ns) {
         if (seen.has(c[0])) continue;  // superko check
         let score = (ln.blackToPlay ? 1 : -1) *
           c[4] *
-          (map.get(c[0])?.Q ?? 0) +
-          (2 * Math.sqrt(ln.N) / (c[1]));
+          (map.get(c[0])?.Q ?? ln.Q) +
+          (2 * ln.getcPUCT() * Math.sqrt(ln.N) / (c[1]));
         if (score > bestScore) {
           bestScore = score;
           bestCount = 1;
@@ -300,7 +317,7 @@ async function getMoves(ns) {
       if (map.has(nh[0])) {
         path.push(map.get(nh[0]));
       } else {
-        new MCGSNode(nh[2], !ln.blackToPlay, map, seen, ns);
+        nn = new MCGSNode(nh[2], !ln.blackToPlay, map, seen, ns);
         break;
       }
     }
@@ -311,6 +328,7 @@ async function getMoves(ns) {
         s += c[1] * (map.get(c[0])?.Q ?? 0);
       }
       node.Q = (node.U + s) / node.N;
+      node.PV.push(nn.U);
     }
   }
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
@@ -358,7 +376,6 @@ function speshulMove(ns) {
       }
     }
   }
-  // might be better to prefer a move farthest from the enemy's stones (or closest?)
   let md = 0;
   let m = null;
   for (let p of priority.length ? priority : candidates) {
@@ -380,10 +397,12 @@ export async function main(ns) {
       ns.go.resetBoardState('Illuminati', 5);
     } while (ns.go.getBoardState()[2][2] != '.');
     let lastMove = await ns.go.makeMove(2,2);
+    /*
     let speshul = speshulMove(ns);
     if (speshul) {
       lastMove = await ns.go.makeMove(...speshul)
     }
+    */
     
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
@@ -417,4 +436,5 @@ export async function main(ns) {
     }
     await ns.asleep(0);
   }
+  
 }
