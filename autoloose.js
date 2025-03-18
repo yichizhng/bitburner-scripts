@@ -9,8 +9,9 @@ const BITMASKS =
     1260498195, 1415842264, -1897880285, -273553814, 1944522789,
     599390262, 1033445011, -937107540, 1168511328, 1158173073,
     894866539, 1807160375, -599589627, 498624852, -1271883029]
-const PLAYOUTS = 10000;
-const EXPLORATION_PARAMETER =  0.3;
+const PLAYOUTS = 30000;
+const EXPLORATION_PARAMETER = 0.15;
+const VERBOSE = false;
 
 /** @param {string[][]} board
   * @param {boolean} blackToPlay */
@@ -192,6 +193,8 @@ class MCGSNode {
     this.blackToPlay = blackToPlay;
     this.hash = zobristHash(board, blackToPlay);
 
+    //let bb = board.map(x => x.join(''));
+    //let liberties = this.ns.go.analysis.getLiberties(bb);
     let liberties = getLibertiesLite(board);
     /** @type [number, number, string[][], [number,number]|null, number][] */
     this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 0.2]];
@@ -199,6 +202,25 @@ class MCGSNode {
       for (let y = 0; y < 5; ++y) {
         let np = addMove(board, liberties, x, y, blackToPlay);
         if (!np) continue;
+        // check for move dumbness
+        let weight = 1;
+        let fillsEye = true;
+        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          if (liberties[x + dx]?.[y + dy] == 1) {
+            weight *= 2; fillsEye = false;
+          }
+          if (board[x + dx]?.[y + dy] == '.') {
+            fillsEye = false;
+          }
+          if (board[x + dx]?.[y + dy] == 'O' && blackToPlay) {
+            fillsEye = false;
+          }
+          if (board[x + dx]?.[y + dy] == 'X' && !blackToPlay) {
+            fillsEye = false;
+          }
+        }
+        if (fillsEye) weight = 0.05;
+
         let hash = zobristHash(np, !blackToPlay);
         this.children.push([hash, 0, np, [x, y], weight]);
       }
@@ -207,18 +229,24 @@ class MCGSNode {
 
     // result of the playout rooted at this position
     this.U = fastPlayout(this.board, this.blackToPlay, history, this.ns);
+
+    // Playouts going though this node
     this.N = 1;
+
+    // Expected utility of playouts going through this node
     this.Q = this.U;
 
+    // Total utility of playouts going through this node
     this.S = this.U;
-    this.SS = this.U**2;
+
+    // Total square of utility of playouts going through this node
+    this.SS = this.U ** 2;
   }
 
   getcPUCT() {
-    if (this.N < this.children.length) {
-      return 25;
-    }
-    return Math.max(0.1, Math.sqrt(this.SS / this.N - (this.S / this.N)**2));
+    return (20 + this.N * Math.max(0.1, Math.sqrt(
+      (this.SS) / (this.N)
+      - ((this.S) / (this.N)) ** 2))) / (this.N + 1);
   }
 }
 
@@ -229,8 +257,24 @@ async function getMoves(ns, bordoverride) {
   let map = new Map();
   let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]), ns);
   for (let i = 0; i < PLAYOUTS; ++i) {
-    if (i % 1000 == 999) {
+    if (i % 2000 == 1999) {
+      if (VERBOSE) {
+        ns.print();
+        let children = root.children.toSorted((x, y) => y[1] - x[1]);
+        for (let c of children) {
+          ns.print('Move: ', c[3] ? moveName(...c[3]) : 'pass',
+            ' N = ', c[1], ', Q = ', map.get(c[0])?.Q ?? 0);
+        }
+      }
       await ns.asleep(0);
+      // Terminate early if one move is overwhelmingly preferred, or already guaranteed to win
+      let c = root.children.reduce((x, y) => y[1] > x[1] ? y : x);
+        ns.print('current best move: ', c[3] ? moveName(...c[3]) : 'pass', ' ', ns.formatPercent(c[1]/i));
+      if (c[1] > 0.9 * i || c[1] >= 0.5 * PLAYOUTS) {
+        break;
+      }
+      // Or if very winning or losing
+      if (root.Q > 20 || root.Q < 4) break;
     }
     let seen = new Set();
     seen.add(root.hash);
@@ -252,8 +296,8 @@ async function getMoves(ns, bordoverride) {
           (map.get(c[0])?.Q ?? ln.Q) +
           // c[4] *
           (EXPLORATION_PARAMETER *
-          (map.get(c[0])?.getcPUCT?.() ?? 25) // child node's variance
-          * Math.sqrt(ln.N) / (1+c[1]));
+            (map.get(c[0])?.getcPUCT?.() ?? 25) // child node's variance
+            * Math.sqrt(ln.N) / (1 + c[1]));
         if (score > bestScore) {
           bestScore = score;
           bestCount = 1;
@@ -290,17 +334,17 @@ async function getMoves(ns, bordoverride) {
       }
       node.Q = (node.U + s) / node.N;
       node.S += nn;
-      node.SS += nn**2;
+      node.SS += nn ** 2;
     }
   }
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
   for (let c of children) {
     c[2] = map.get(c[0])?.Q ?? 0;
     ns.print('Move: ', c[3] ? moveName(...c[3]) : 'pass',
-    ' N = ' + c[1] + ', Q = ' + c[2]);
+      ' N = ' + c[1] + ', Q = ' + c[2]);
   }
   ns.print('Expected value: ', root.Q);
-  ns.print('Variance: ', root.getcPUCT());
+  ns.print('Standard deviation: ', root.getcPUCT());
   return children;
 }
 
@@ -334,6 +378,18 @@ export async function main(ns) {
   ns.disableLog('asleep');
   ns.clearLog();
 
+  /* board testing
+  let notsekibord =
+    [
+      'XXXX.',
+      '.XXXX',
+      'OOOXX',
+      'O.OXX',
+      'OOOXX',
+    ].map(x => [...x]);
+  await getMoves(ns);
+  return;
+  //*/
   let start = Date.now();
   for (let i = 0; i < 100; ++i) {
     do {
@@ -369,11 +425,11 @@ export async function main(ns) {
         }
       }
       if (!moved) {
-        ns.tprint(ns.go.getBoardState().join('\n'));
+        // ns.tprint(ns.go.getBoardState().join('\n'));
         lastMove = await ns.go.passTurn();
       }
     }
     await ns.asleep(0);
   }
-  ns.print('Average game time was ', (Date.now() - start)/100000, 'seconds');
+  ns.print('Average game time was ', (Date.now() - start) / 100000, 'seconds');
 }
