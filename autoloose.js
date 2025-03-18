@@ -133,19 +133,12 @@ function fastPlayout(position, blackToPlay, history, ns) {
     let np = position.map(x => [...x]);
     let liberties = getLibertiesLite(position);
     let moves = [];
-    let priorityMoves = [];
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
         let fillsEye = true;
-        //let isAtari = false;
         for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
           if (liberties[x + dx]?.[y + dy] == 1) {
             fillsEye = false;
-            /*
-            if ((position[x + dx]?.[y + dy] == 'X') ^ blackToPlay) {
-              isAtari = true;
-            }
-            */
           }
           if (position[x + dx]?.[y + dy] == '.') {
             fillsEye = false; break;
@@ -166,15 +159,10 @@ function fastPlayout(position, blackToPlay, history, ns) {
         if (!nc) continue;
         let hash = zobristHash(nc, !blackToPlay);
         if (history.has(hash)) continue;
-
-        // if (isAtari && !blackToPlay) priorityMoves.push(np);
         moves.push(nc);
       }
     }
-    if (priorityMoves.length) {
-      lastPassed = false;
-      np = priorityMoves[Math.floor(Math.random() * priorityMoves.length)]
-    } else if (moves.length) {
+    if (moves.length) {
       lastPassed = false;
       np = moves[Math.floor(Math.random() * moves.length)]
     } else {
@@ -204,8 +192,6 @@ class MCGSNode {
     this.blackToPlay = blackToPlay;
     this.hash = zobristHash(board, blackToPlay);
 
-    //let bb = board.map(x => x.join(''));
-    //let liberties = this.ns.go.analysis.getLiberties(bb);
     let liberties = getLibertiesLite(board);
     /** @type [number, number, string[][], [number,number]|null, number][] */
     this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 0.2]];
@@ -213,25 +199,6 @@ class MCGSNode {
       for (let y = 0; y < 5; ++y) {
         let np = addMove(board, liberties, x, y, blackToPlay);
         if (!np) continue;
-        // check for move dumbness
-        let weight = 1;
-        let fillsEye = true;
-        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-          if (liberties[x + dx]?.[y + dy] == 1) {
-            weight *= 2; fillsEye = false;
-          }
-          if (board[x + dx]?.[y + dy] == '.') {
-            fillsEye = false;
-          }
-          if (board[x + dx]?.[y + dy] == 'O' && blackToPlay) {
-            fillsEye = false;
-          }
-          if (board[x + dx]?.[y + dy] == 'X' && !blackToPlay) {
-            fillsEye = false;
-          }
-        }
-        if (fillsEye) weight = 0.05;
-
         let hash = zobristHash(np, !blackToPlay);
         this.children.push([hash, 0, np, [x, y], weight]);
       }
@@ -243,17 +210,15 @@ class MCGSNode {
     this.N = 1;
     this.Q = this.U;
 
-    // results of all playouts going through this position
-    this.PV = [this.U];
+    this.S = this.U;
+    this.SS = this.U**2;
   }
 
   getcPUCT() {
-    let avg = 0;
-    for (let v of this.PV) avg += v;
-    avg /= this.PV.length;
-    let variance = 4;
-    for (let v of this.PV) variance += (v - avg) ** 2;
-    return (variance / (1 + this.PV.length)) ** 0.5;
+    if (this.N < this.children.length) {
+      return 25;
+    }
+    return Math.max(0.1, Math.sqrt(this.SS / this.N - (this.S / this.N)**2));
   }
 }
 
@@ -271,8 +236,6 @@ async function getMoves(ns, bordoverride) {
     seen.add(root.hash);
     let path = [root];
     let nn = 0;
-    // See https://github.com/lightvector/KataGo/blob/master/docs/GraphSearch.md
-    // for the explanation of this algorithm.
     while (true) {
       let ln = path.at(-1);
       let bestScore = -Infinity;
@@ -287,7 +250,10 @@ async function getMoves(ns, bordoverride) {
         }
         let score = (ln.blackToPlay ? 1 : -1) *
           (map.get(c[0])?.Q ?? ln.Q) +
-          (EXPLORATION_PARAMETER * ln.getcPUCT() * Math.sqrt(ln.N) / (c[1]));
+          // c[4] *
+          (EXPLORATION_PARAMETER *
+          (map.get(c[0])?.getcPUCT?.() ?? 25) // child node's variance
+          * Math.sqrt(ln.N) / (1+c[1]));
         if (score > bestScore) {
           bestScore = score;
           bestCount = 1;
@@ -315,6 +281,7 @@ async function getMoves(ns, bordoverride) {
         break;
       }
     }
+    // See https://github.com/lightvector/KataGo/blob/master/docs/GraphSearch.md
     for (let i = path.length; i-- > 0;) {
       let node = path[i];
       let s = 0;
@@ -322,15 +289,18 @@ async function getMoves(ns, bordoverride) {
         s += c[1] * (map.get(c[0])?.Q ?? 0);
       }
       node.Q = (node.U + s) / node.N;
-      node.PV.push(nn);
+      node.S += nn;
+      node.SS += nn**2;
     }
   }
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
   for (let c of children) {
     c[2] = map.get(c[0])?.Q ?? 0;
-    ns.print('Move: ', c[3] ? moveName(...c[3]) : 'pass');
-    ns.print('N = ' + c[1] + ', Q = ' + c[2]);
+    ns.print('Move: ', c[3] ? moveName(...c[3]) : 'pass',
+    ' N = ' + c[1] + ', Q = ' + c[2]);
   }
+  ns.print('Expected value: ', root.Q);
+  ns.print('Variance: ', root.getcPUCT());
   return children;
 }
 
@@ -364,11 +334,13 @@ export async function main(ns) {
   ns.disableLog('asleep');
   ns.clearLog();
 
+  let start = Date.now();
   for (let i = 0; i < 100; ++i) {
     do {
       ns.go.resetBoardState('Illuminati', 5);
     } while (ns.go.getBoardState()[2][2] != '.');
     let lastMove = await ns.go.makeMove(2, 2);
+
 
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
@@ -397,12 +369,11 @@ export async function main(ns) {
         }
       }
       if (!moved) {
-        ns.tprint('WARNING: fell through to pass in position:');
         ns.tprint(ns.go.getBoardState().join('\n'));
         lastMove = await ns.go.passTurn();
       }
     }
     await ns.asleep(0);
   }
-
+  ns.print('Average game time was ', (Date.now() - start)/100000, 'seconds');
 }
