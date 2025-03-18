@@ -10,6 +10,7 @@ const BITMASKS =
     599390262, 1033445011, -937107540, 1168511328, 1158173073,
     894866539, 1807160375, -599589627, 498624852, -1271883029]
 const PLAYOUTS = 10000;
+const EXPLORATION_PARAMETER =  0.2;
 
 /** @param {string[][]} board
   * @param {boolean} blackToPlay */
@@ -257,8 +258,8 @@ class MCGSNode {
 }
 
 /** @param {NS} ns */
-async function getMoves(ns) {
-  let b = ns.go.getBoardState().map(x => x.split(''));
+async function getMoves(ns, bordoverride) {
+  let b = bordoverride ?? ns.go.getBoardState().map(x => x.split(''));
 
   let map = new Map();
   let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]), ns);
@@ -273,11 +274,6 @@ async function getMoves(ns) {
     // See https://github.com/lightvector/KataGo/blob/master/docs/GraphSearch.md
     // for the explanation of this algorithm.
     while (true) {
-      if (path.length > 100) {
-        ns.print('aborting due to path overflow')
-        ns.print(path.map(x=>x.hash));
-        ns.exit();
-      }
       let ln = path.at(-1);
       let bestScore = -Infinity;
       let bestCount = 0;
@@ -290,9 +286,8 @@ async function getMoves(ns) {
           // consider pass as normal
         }
         let score = (ln.blackToPlay ? 1 : -1) *
-          c[4] *
           (map.get(c[0])?.Q ?? ln.Q) +
-          (ln.getcPUCT() * Math.sqrt(ln.N) / (c[1]));
+          (0.2 * ln.getcPUCT() * Math.sqrt(ln.N) / (c[1]));
         if (score > bestScore) {
           bestScore = score;
           bestCount = 1;
@@ -304,14 +299,14 @@ async function getMoves(ns) {
           }
         }
       }
+      // Update node statistics
+      nh[1]++;
+      ln.N++;
       if (nh[0] === path.at(-2)?.hash) {
         // double pass ends the game
         nn = scoreTerminal(ln.board);
         break;
       }
-      // Update node statistics
-      nh[1]++;
-      ln.N++;
       seen.add(nh[0]);
       if (map.has(nh[0])) {
         path.push(map.get(nh[0]));
@@ -332,8 +327,9 @@ async function getMoves(ns) {
   }
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
   for (let c of children) {
+    c[2] = map.get(c[0])?.Q ?? 0;
     ns.print('Move: ', c[3] ? moveName(...c[3]) : 'pass');
-    ns.print('N = ' + c[1] + ', Q = ' + (map.get(c[0])?.Q ?? 0));
+    ns.print('N = ' + c[1] + ', Q = ' + c[2]);
   }
   return children;
 }
@@ -367,6 +363,7 @@ function scoreTerminal(position) {
 export async function main(ns) {
   ns.disableLog('asleep');
   ns.clearLog();
+
   for (let i = 0; i < 100; ++i) {
     do {
       ns.go.resetBoardState('Illuminati', 5);
@@ -385,16 +382,18 @@ export async function main(ns) {
       let moves = await getMoves(ns);
       let moved = false;
       let legalmoves = ns.go.analysis.getValidMoves();
+      let passq = 0;
       for (let [h, n, q, m] of moves) {
         if (!m) {
-          lastMove = await ns.go.passTurn();
-          moved = true;
-          break;
+          passq = q;
+          continue;
         }
         if (legalmoves[m[0]][m[1]]) {
-          lastMove = await ns.go.makeMove(...m);
-          moved = true;
-          break;
+          if (q > passq - 1) {
+            lastMove = await ns.go.makeMove(...m);
+            moved = true;
+            break;
+          }
         }
       }
       if (!moved) {
