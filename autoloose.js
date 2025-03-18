@@ -11,7 +11,6 @@ const BITMASKS =
     894866539, 1807160375, -599589627, 498624852, -1271883029]
 const PLAYOUTS = 30000;
 const EXPLORATION_PARAMETER = 0.15;
-const VERBOSE = false;
 
 /** @param {string[][]} board
   * @param {boolean} blackToPlay */
@@ -196,39 +195,20 @@ class MCGSNode {
     //let bb = board.map(x => x.join(''));
     //let liberties = this.ns.go.analysis.getLiberties(bb);
     let liberties = getLibertiesLite(board);
-    /** @type [number, number, string[][], [number,number]|null, number][] */
-    this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 0.2]];
+    /** @type [number, number, string[][], [number,number]|null][] */
+    this.children = [[this.hash ^ BITMASKS[50], 0, board, null]];
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
         let np = addMove(board, liberties, x, y, blackToPlay);
         if (!np) continue;
-        // check for move dumbness
-        let weight = 1;
-        let fillsEye = true;
-        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-          if (liberties[x + dx]?.[y + dy] == 1) {
-            weight *= 2; fillsEye = false;
-          }
-          if (board[x + dx]?.[y + dy] == '.') {
-            fillsEye = false;
-          }
-          if (board[x + dx]?.[y + dy] == 'O' && blackToPlay) {
-            fillsEye = false;
-          }
-          if (board[x + dx]?.[y + dy] == 'X' && !blackToPlay) {
-            fillsEye = false;
-          }
-        }
-        if (fillsEye) weight = 0.05;
-
         let hash = zobristHash(np, !blackToPlay);
-        this.children.push([hash, 0, np, [x, y], weight]);
+        this.children.push([hash, 0, np, [x, y]]);
       }
     }
     map.set(this.hash, this);
 
     // result of the playout rooted at this position
-    this.U = fastPlayout(this.board, this.blackToPlay, history, this.ns);
+    this.U = fastPlayout(this.board, this.blackToPlay, history);
 
     // Playouts going though this node
     this.N = 1;
@@ -250,26 +230,17 @@ class MCGSNode {
   }
 }
 
-/** @param {NS} ns */
-async function getMoves(ns, bordoverride) {
-  let b = bordoverride ?? ns.go.getBoardState().map(x => x.split(''));
+/** @param {string[] | string[][]} board */
+async function getMoves(board) {
+  let b = board.map(x => [...x]);
 
   let map = new Map();
-  let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]), ns);
+  let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]));
   for (let i = 0; i < PLAYOUTS; ++i) {
     if (i % 2000 == 1999) {
-      if (VERBOSE) {
-        ns.print();
-        let children = root.children.toSorted((x, y) => y[1] - x[1]);
-        for (let c of children) {
-          ns.print('Move: ', c[3] ? moveName(...c[3]) : 'pass',
-            ' N = ', c[1], ', Q = ', map.get(c[0])?.Q ?? 0);
-        }
-      }
-      await ns.asleep(0);
+      await new Promise((resolve) => setTimeout(resolve, 0));
       // Terminate early if one move is overwhelmingly preferred, or already guaranteed to win
       let c = root.children.reduce((x, y) => y[1] > x[1] ? y : x);
-        ns.print('current best move: ', c[3] ? moveName(...c[3]) : 'pass', ' ', ns.formatPercent(c[1]/i));
       if (c[1] > 0.9 * i || c[1] >= 0.5 * PLAYOUTS) {
         break;
       }
@@ -294,7 +265,6 @@ async function getMoves(ns, bordoverride) {
         }
         let score = (ln.blackToPlay ? 1 : -1) *
           (map.get(c[0])?.Q ?? ln.Q) +
-          // c[4] *
           (EXPLORATION_PARAMETER *
             (map.get(c[0])?.getcPUCT?.() ?? 25) // child node's variance
             * Math.sqrt(ln.N) / (1 + c[1]));
@@ -321,7 +291,7 @@ async function getMoves(ns, bordoverride) {
       if (map.has(nh[0])) {
         path.push(map.get(nh[0]));
       } else {
-        nn = new MCGSNode(nh[2], !ln.blackToPlay, map, seen, ns).U;
+        nn = new MCGSNode(nh[2], !ln.blackToPlay, map, seen).U;
         break;
       }
     }
@@ -340,12 +310,8 @@ async function getMoves(ns, bordoverride) {
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
   for (let c of children) {
     c[2] = map.get(c[0])?.Q ?? 0;
-    ns.print('Move: ', c[3] ? moveName(...c[3]) : 'pass',
-      ' N = ' + c[1] + ', Q = ' + c[2]);
   }
-  ns.print('Expected value: ', root.Q);
-  ns.print('Standard deviation: ', root.getcPUCT());
-  return children;
+  return [root.Q, root.getcPUCT(), children];
 }
 
 function scoreTerminal(position) {
@@ -387,17 +353,20 @@ export async function main(ns) {
       'O.OXX',
       'OOOXX',
     ].map(x => [...x]);
-  await getMoves(ns);
+  let [q, s, moves] = await getMoves(ns.go.getBoardState());
+  for (let m of moves) {
+    ns.print(m[3] ? moveName(...m[3]) : 'pass');
+    ns.print('N: ', m[1], ' Q: ', m[2])
+  }
+  ns.print('Q: ', q, ' S: ', s)
   return;
   //*/
   let start = Date.now();
-  for (let i = 0; i < 100; ++i) {
-    do {
-      ns.go.resetBoardState('Illuminati', 5);
-    } while (ns.go.getBoardState()[2][2] != '.');
-    let lastMove = await ns.go.makeMove(2, 2);
+  l: for (let i = 0; i < 100; ++i) {
+    ns.go.resetBoardState('Illuminati', 5);
+    let firstMove = true;
 
-
+    let lastMove = {};
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
         // end the game if there are no white stones left
@@ -407,7 +376,13 @@ export async function main(ns) {
         }
       }
 
-      let moves = await getMoves(ns);
+      let [q, s, moves] = await getMoves(ns.go.getBoardState());
+      if (firstMove && q < 9) {
+        ns.print('refusing to play position');
+        ns.print(ns.go.getBoardState().join('\n'));
+        break;
+      }
+      ns.print('Q: ', q, ' S: ', s);
       let moved = false;
       let legalmoves = ns.go.analysis.getValidMoves();
       let passq = 0;
@@ -428,6 +403,7 @@ export async function main(ns) {
         // ns.tprint(ns.go.getBoardState().join('\n'));
         lastMove = await ns.go.passTurn();
       }
+      firstMove = false;
     }
     await ns.asleep(0);
   }
