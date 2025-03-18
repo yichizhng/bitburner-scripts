@@ -90,27 +90,27 @@ function addMove(board, liberties, x, y, blackToPlay) {
 
 /** @param {string[][]} position */
 function getLibertiesLite(position) {
-  let liberties = position.map(x=>x.map(()=>-1));
+  let liberties = position.map(x => x.map(() => -1));
   for (let x = 0; x < 5; ++x) {
     for (let y = 0; y < 5; ++y) {
       if (liberties[x][y] == -1 && (position[x][y] == 'X' || position[x][y] == 'O')) {
         let l = 0;
         let seen = [];
-        let group = [[x,y]];
-        seen[10*x+y] = 1;
+        let group = [[x, y]];
+        seen[10 * x + y] = 1;
         for (let i = 0; i < group.length; ++i) {
-          for (let [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-            let xx = group[i][0]+dx, yy = group[i][1]+dy;
-            if (seen[10*xx+yy]) continue;
-            seen[10*xx+yy] = 1;
+          for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            let xx = group[i][0] + dx, yy = group[i][1] + dy;
+            if (seen[10 * xx + yy]) continue;
+            seen[10 * xx + yy] = 1;
             if (position[xx]?.[yy] == position[x][y]) {
-              group.push([xx,yy])
+              group.push([xx, yy])
             } else if (position[xx]?.[yy] == '.') {
               l++;
             }
           }
         }
-        for (let [xx,yy] of group) {
+        for (let [xx, yy] of group) {
           liberties[xx][yy] = l;
         }
       }
@@ -184,23 +184,7 @@ function fastPlayout(position, blackToPlay, history, ns) {
     blackToPlay = !blackToPlay;
     history.add(zobristHash(position, blackToPlay));
   }
-  let wc = 0, bc = 0, ec = 0;
-  for (let x = 0; x < 5; ++x) {
-    for (let y = 0; y < 5; ++y) {
-      if (position[x][y] == 'X') {
-        bc++;
-      }
-      if (position[x][y] == 'O') {
-        wc++;
-      }
-      if (position[x][y] == '.') {
-        ec++;
-      }
-    }
-  }
-  if (bc < 4) return 0;
-  if (wc < 4) return wc+ec+bc;
-  return bc;
+  return scoreTerminal(position);
 }
 
 function moveName(x, y) {
@@ -231,24 +215,24 @@ class MCGSNode {
         // check for move dumbness
         let weight = 1;
         let fillsEye = true;
-        for (let [dx,dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-          if (liberties[x+dx]?.[y+dy] == 1) {
+        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          if (liberties[x + dx]?.[y + dy] == 1) {
             weight *= 2; fillsEye = false;
           }
-          if (board[x+dx]?.[y+dy] == '.') {
+          if (board[x + dx]?.[y + dy] == '.') {
             fillsEye = false;
           }
-          if (board[x+dx]?.[y+dy] == 'O' && blackToPlay) {
+          if (board[x + dx]?.[y + dy] == 'O' && blackToPlay) {
             fillsEye = false;
           }
-          if (board[x+dx]?.[y+dy] == 'X' && !blackToPlay) {
+          if (board[x + dx]?.[y + dy] == 'X' && !blackToPlay) {
             fillsEye = false;
           }
         }
         if (fillsEye) weight = 0.05;
 
         let hash = zobristHash(np, !blackToPlay);
-        this.children.push([hash, 0, np, [x,y], weight]);
+        this.children.push([hash, 0, np, [x, y], weight]);
       }
     }
     map.set(this.hash, this);
@@ -279,26 +263,36 @@ async function getMoves(ns) {
   let map = new Map();
   let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]), ns);
   for (let i = 0; i < PLAYOUTS; ++i) {
-    if (i%1000 == 999) {
+    if (i % 1000 == 999) {
       await ns.asleep(0);
     }
     let seen = new Set();
     seen.add(root.hash);
     let path = [root];
-    let nn = null;
+    let nn = 0;
     // See https://github.com/lightvector/KataGo/blob/master/docs/GraphSearch.md
     // for the explanation of this algorithm.
     while (true) {
+      if (path.length > 100) {
+        ns.print('aborting due to path overflow')
+        ns.print(path.map(x=>x.hash));
+        ns.exit();
+      }
       let ln = path.at(-1);
       let bestScore = -Infinity;
       let bestCount = 0;
       let nh = ln.children[0];
       for (let c of ln.children) {
-        if (seen.has(c[0])) continue;  // superko check
+        if (seen.has(c[0])) {
+          if (c[3] != null) {
+            continue;  // illegal due to superko
+          }
+          // consider pass as normal
+        }
         let score = (ln.blackToPlay ? 1 : -1) *
           c[4] *
           (map.get(c[0])?.Q ?? ln.Q) +
-          (2 * ln.getcPUCT() * Math.sqrt(ln.N) / (c[1]));
+          (ln.getcPUCT() * Math.sqrt(ln.N) / (c[1]));
         if (score > bestScore) {
           bestScore = score;
           bestCount = 1;
@@ -310,6 +304,11 @@ async function getMoves(ns) {
           }
         }
       }
+      if (nh[0] === path.at(-2)?.hash) {
+        // double pass ends the game
+        nn = scoreTerminal(ln.board);
+        break;
+      }
       // Update node statistics
       nh[1]++;
       ln.N++;
@@ -317,18 +316,18 @@ async function getMoves(ns) {
       if (map.has(nh[0])) {
         path.push(map.get(nh[0]));
       } else {
-        nn = new MCGSNode(nh[2], !ln.blackToPlay, map, seen, ns);
+        nn = new MCGSNode(nh[2], !ln.blackToPlay, map, seen, ns).U;
         break;
       }
     }
-    for (let i = path.length; i --> 0;) {
+    for (let i = path.length; i-- > 0;) {
       let node = path[i];
       let s = 0;
       for (let c of node.children) {
         s += c[1] * (map.get(c[0])?.Q ?? 0);
       }
       node.Q = (node.U + s) / node.N;
-      node.PV.push(nn.U);
+      node.PV.push(nn);
     }
   }
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
@@ -339,53 +338,29 @@ async function getMoves(ns) {
   return children;
 }
 
-function speshulMove(ns) {
-  let board = ns.go.getBoardState();
-  let candidates = [], priority = [];
-  // Look for a corner or corner-adjacent move which has
-  // two liberties to sacrifice on, preferring one which
-  // is adjacent to another one.
-  let fliberties = board.map(x=>Array.from(x, ()=>0));
+function scoreTerminal(position) {
+  let liberties = getLibertiesLite(position);
+  let bl = 0, wl = 0;
+  let wc = 0, bc = 0, ec = 0;
   for (let x = 0; x < 5; ++x) {
     for (let y = 0; y < 5; ++y) {
-      if (board[x][y] == '.') {
-        for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          let xx = x+dx, yy = y+dy;
-          if (board[xx]?.[yy] == '.') {
-            fliberties[xx][yy]++;
-          }
-        }
+      if (position[x][y] == 'X') {
+        bc++;
+        if (liberties[x][y] > bl) bl = liberties[x][y];
+      }
+      if (position[x][y] == 'O') {
+        wc++;
+        if (liberties[x][y] > wl) wl = liberties[x][y];
+      }
+      if (position[x][y] == '.') {
+        ec++;
       }
     }
   }
-  for (let x = 0; x < 5; ++x) {
-    for (let y = 0; y < 5; ++y) {
-      if (!(x == 0 || x == 4 || y == 0 || y == 4)) continue;
-      if (board[x][y] != '.') continue;
-      if (fliberties[x][y] != 2) continue;
-      let isPriority = false;
-      for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        if (fliberties[x+dx]?.[y+dy] == 2) {
-          isPriority = true; break;
-        }
-      }
-      if (isPriority) {
-        priority.push([x,y]);
-      } else {
-        candidates.push([x,y]);
-      }
-    }
-  }
-  let md = 0;
-  let m = null;
-  for (let p of priority.length ? priority : candidates) {
-    let d = Math.abs(p[0]-2) + Math.abs(p[1]-2);
-    if (d > md) {
-      md = d;
-      m = p;
-    }
-  }
-  return m;
+  if (wl == bl) return bc;  // we assume it's seki or something
+  if (wl >= 2 && bl >= 2) return bc;  // same
+  if (wl > bl) return 0;  // big loss
+  return wc + ec + bc;  // big win
 }
 
 /** @param {NS} ns */
@@ -396,14 +371,8 @@ export async function main(ns) {
     do {
       ns.go.resetBoardState('Illuminati', 5);
     } while (ns.go.getBoardState()[2][2] != '.');
-    let lastMove = await ns.go.makeMove(2,2);
-    /*
-    let speshul = speshulMove(ns);
-    if (speshul) {
-      lastMove = await ns.go.makeMove(...speshul)
-    }
-    */
-    
+    let lastMove = await ns.go.makeMove(2, 2);
+
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
         // end the game if there are no white stones left
@@ -436,5 +405,5 @@ export async function main(ns) {
     }
     await ns.asleep(0);
   }
-  
+
 }
