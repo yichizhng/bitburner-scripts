@@ -10,7 +10,7 @@ const BITMASKS =
     599390262, 1033445011, -937107540, 1168511328, 1158173073,
     894866539, 1807160375, -599589627, 498624852, -1271883029]
 const PLAYOUTS = 10000;
-const EXPLORATION_PARAMETER =  0.2;
+const EXPLORATION_PARAMETER =  0.3;
 
 /** @param {string[][]} board
   * @param {boolean} blackToPlay */
@@ -287,7 +287,7 @@ async function getMoves(ns, bordoverride) {
         }
         let score = (ln.blackToPlay ? 1 : -1) *
           (map.get(c[0])?.Q ?? ln.Q) +
-          (0.2 * ln.getcPUCT() * Math.sqrt(ln.N) / (c[1]));
+          (EXPLORATION_PARAMETER * ln.getcPUCT() * Math.sqrt(ln.N) / (c[1]));
         if (score > bestScore) {
           bestScore = score;
           bestCount = 1;
