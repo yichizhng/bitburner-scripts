@@ -12,7 +12,7 @@ const BITMASKS =
 const PLAYOUTS = 10000;
 const EXPLORATION_PARAMETER = 0.3;
 
-/** @param {string[][]} board
+/** @param {string[][] | string[]} board
   * @param {boolean} blackToPlay */
 function zobristHash(board, blackToPlay) {
   var x = 0;
@@ -247,15 +247,17 @@ class TerminalNode {
   getcPUCT() { return 0; }
 }
 
-/** @param {string[] | string[][]} board */
-async function getMoves(board) {
+/** 
+ * @param {string[] | string[][]} board 
+ * @param {number[]} seen_hashes
+ */
+function getMoves(board, seen_hashes = []) {
   let b = board.map(x => [...x]);
 
   let map = new Map();
   let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]));
   for (let i = 0; i < PLAYOUTS; ++i) {
     if (i % 2000 == 1999) {
-      await new Promise((resolve) => setTimeout(resolve, 0));
       // Terminate early if one move is overwhelmingly preferred, or already guaranteed to win
       let c = root.children.reduce((x, y) => y[1] > x[1] ? y : x);
       if (c[3]) {
@@ -266,7 +268,7 @@ async function getMoves(board) {
         if (root.Q > 20 || root.Q < 4) break;
       }
     }
-    let seen = new Set();
+    let seen = new Set(seen_hashes);
     seen.add(root.hash);
     let path = [root];
     let nn = 0;
@@ -278,9 +280,9 @@ async function getMoves(board) {
       for (let c of ln.children) {
         if (seen.has(c[0])) {
           if (c[3] == null) {
+            // TODO: it actually doesn't need to be stored in the map at all
             let key = 't' + ln.hash;
             ln.DP ??= [key, 0, null, null];
-            // the key is a string so it cannot be conflated with normal nodes
             let child = map.get(key)
             if (!map.has(key)) {
               nn = scoreTerminal(ln.board, true);
@@ -344,6 +346,10 @@ async function getMoves(board) {
       node.S += nn;
       node.SS += nn ** 2;
     }
+  }
+  if (root.DP) {
+    // white passed last move; DP replaces the pass node
+    root.children[0] = root.DP;
   }
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
   for (let c of children) {
@@ -409,11 +415,9 @@ export async function main(ns) {
 
   let worker_script = ns.read(ns.getScriptName()).split('export')[0] + `
   onmessage = function(e) {
-    getMoves(e.data).then(r => {
-      postMessage(r);
-    });
+    postMessage(getMoves(...e.data));
   }`;
-  let blob = new Blob([worker_script], {type: 'module'});
+  let blob = new Blob([worker_script], {type: 'text/javascript'});
   let url = URL.createObjectURL(blob);
   let worker = new Worker(url);
   let resolve;
@@ -421,19 +425,31 @@ export async function main(ns) {
     resolve?.(e.data);
   }
   ns.atExit(() => worker.terminate(), 'worker');
-  let getMoves = function(d) {
+  let getMoves = function(d, m) {
     return new Promise((res, rej) => {
 	    ns.atExit(rej, 'worker_promise')
 	    resolve = res;
-      worker.postMessage(d);
+      worker.postMessage([d, m]);
 	  });
   }
 
+  /* testing code
+  let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
+  ns.clearLog()
+
+  let [q,s,moves] = await getMoves(ns.go.getBoardState(), seen);
+  for (let [h, n, q, m] of moves) {
+    ns.print(m, ' N = ', n, ' Q = ', q, ' H = ', h);
+  }
+  // ns.print(zobristHash(pbord, false));
+  return;
+  //*/
+
   let start = Date.now();
-  l: for (let i = 0; i < 100; ++i) {
+  for (let i = 0; i < 100; ++i) {
     do {
       ns.go.resetBoardState('Illuminati', 5);
-    } while (ns.go.getBoardState()[2][2] != '.')
+    } while (ns.go.getBoardState()[2][2] != '.');
 
     let lastMove = await ns.go.makeMove(2,2);
     while (lastMove.type != 'gameOver') {
@@ -444,27 +460,29 @@ export async function main(ns) {
           break;
         }
       }
-
-      let [q, s, moves] = await getMoves(ns.go.getBoardState());
+      let q, s, moves;
+      try {
+        [q, s, moves] = await getMoves(ns.go.getBoardState(), 
+        ns.go.getMoveHistory().map(x=>zobristHash(x, false)));
+      } catch {
+        ns.print('getMoves failed; exiting');
+        return;
+      }
       ns.print('Q: ', q, ' S: ', s);
       let moved = false;
-      let legalmoves = ns.go.analysis.getValidMoves();
       let passq = 0;
       for (let [h, n, q, m] of moves) {
         if (!m) {
           passq = q;
           continue;
         }
-        if (legalmoves[m[0]][m[1]]) {
-          if (q > passq - 1) {
+          if (n && q > passq - 1) {
             lastMove = await ns.go.makeMove(...m);
             moved = true;
             break;
           }
-        }
       }
       if (!moved) {
-        // ns.tprint(ns.go.getBoardState().join('\n'));
         lastMove = await ns.go.passTurn();
       }
     }
