@@ -197,36 +197,34 @@ class MCGSNode {
    * @param {string[][]} board
    * @param {boolean} blackToPlay
    * @param {Map<number, MCGSNode>} map
-   * @param {number[][]} liberties the result of getLibertiesLite(board)
    * @param {Set<number>} history hashes of previous game states, used for superko detection
    */
-  constructor(board, blackToPlay, map, liberties, history) {
+  constructor(board, blackToPlay, map, history) {
     this.board = board;
     this.blackToPlay = blackToPlay;
     this.hash = zobristHash(board, blackToPlay);
 
-    /** @type [number, number, string[][], [number,number]|null, number, number[][]][] */
-    this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 1, liberties]];
+    let liberties = getLibertiesLite(board);
+
+    /** @type [number, number, string[][], [number,number]|null, number, MCGSNode|null][] */
+    this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 1, null]];
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
         let np = addMove(board, liberties, x, y, blackToPlay);
         if (!np) continue;
-        let nl = getLibertiesLite(np, !blackToPlay);
+        // let nl = getLibertiesLite(np, !blackToPlay);
         let hash = zobristHash(np, !blackToPlay);
         let weight = 1;
         if (USE_AI_TWEAKS) {
           if (!blackToPlay) {
             let isnobi = false;
             let istsuke = false;
-            let selfatari = (nl[x][y] == 1);
             for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
               if (liberties[x + dx]?.[y + dy] == 1) {
                 weight = 10;
                 if (board[x + dx][y + dy] == 'X') {
                   // AI loves captures
                   istsuke = true;
-                  // it will ignore self atari to capture, even if that causes a snapback
-                  selfatari = false;
                 }
               }
               if (board[x + dx]?.[y + dy] == 'X' && !istsuke) {
@@ -244,13 +242,21 @@ class MCGSNode {
                 isnobi = true;
               }
             }
-            if ((!isnobi) && (!istsuke) && nl[x][y] != 4) weight = 0.01;
-            // AI hates self atari, except in some cases where it's a bad
-            // move anyway; it won't throw in to destroy eye shape
-            if (selfatari) weight = 0.01;
+            if ((!isnobi) && (!istsuke)) {
+              let isjump = true;
+              // AI will play jumps but only with 4 liberties
+              for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                if (board[x+dx]?.[y+dy] != '.') {
+                  isjump = false; break;
+                }
+              }
+              if (!isjump) weight = 0.01;
+            }
+            // the ai technically will play placements into big eyes,
+            // but only when it's irrelevant and/or too late to matter
           }
         }
-        this.children.push([hash, 0, np, [x, y], weight, nl]);
+        this.children.push([hash, 0, np, [x, y], weight, null]);
       }
     }
     map.set(this.hash, this);
@@ -278,23 +284,6 @@ class MCGSNode {
   }
 }
 
-// Represents a terminal state; used for double pass
-class TerminalNode {
-  /**
-   * @param {string} key
-   * @param {Map<number, MCGSNode>} map
-   */
-  constructor(key, score, map) {
-    map.set(key, this);
-    this.U = score;
-    this.N = 1;
-    this.Q = score;
-    this.S = this.U;
-    this.SS = this.U
-  }
-  getcPUCT() { return 0; }
-}
-
 /** 
  * @param {string[] | string[][]} board 
  * @param {number[]} seen_hashes
@@ -303,7 +292,7 @@ function getMoves(board, seen_hashes = []) {
   let b = board.map(x => [...x]);
 
   let map = new Map();
-  let root = new MCGSNode(b, true, map, getLibertiesLite(b), new Set([zobristHash(b, true)]));
+  let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]));
   for (let i = 0; i < PLAYOUTS; ++i) {
     if (i % 2000 == 1999) {
       // Terminate early if one move is overwhelmingly preferred, or already guaranteed to win
@@ -319,7 +308,7 @@ function getMoves(board, seen_hashes = []) {
     let seen = new Set(seen_hashes);
     seen.add(root.hash);
     let path = [root];
-    let nn = 0;
+    let nn = 0;  // result of playout
     while (true) {
       let ln = path.at(-1);
       let bestScore = -Infinity;
@@ -328,29 +317,25 @@ function getMoves(board, seen_hashes = []) {
       for (let c of ln.children) {
         if (seen.has(c[0])) {
           if (c[3] == null) {
-            // TODO: it actually doesn't need to be stored in the map at all
-            let key = 't' + ln.hash;
-            ln.DP ??= [key, 0, null, null];
-            let child = map.get(key)
-            if (!map.has(key)) {
-              nn = scoreTerminal(ln.board, true);
-              child = new TerminalNode(key, nn, map);
-            }
-            let score = (ln.blackToPlay ? 1 : -1) * child.U;
+            ln.DP ??= ['t', 0, null, null, 1, scoreTerminal(ln.board, true)];
+            let score = (ln.blackToPlay ? 1 : -1) * ln.DP[5];
+            // no exploration factor because we know terminal nodes have no variance
             if (score > bestScore) {
               bestScore = score;
               bestCount = 1;
-              nn = child.U;
+              nn = ln.DP[5];
               nh = ln.DP;
             }
           }
           continue;
         }
+        // eagerly update cached child pointer
+        c[5] ??= map.get(c[0]);
         let score =
           ((ln.blackToPlay ? 1 : -1) *
-            (map.get(c[0])?.Q ?? ln.Q) +
+            (c[5]?.Q ?? ln.Q) +
             (EXPLORATION_PARAMETER *
-              (map.get(c[0])?.getcPUCT?.() ?? 25) // child node's variance
+            (c[5]?.getcPUCT?.() ?? 25) // child node's variance
               * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
           if (c[4] < 1) continue;
@@ -372,13 +357,16 @@ function getMoves(board, seen_hashes = []) {
       ln.N++;
       nh[1]++;
       if (typeof nh[0] == 'string') {
+        nn = nh[5];
         break;
       }
       seen.add(nh[0]);
-      if (map.has(nh[0])) {
-        path.push(map.get(nh[0]));
+      nh[5] ??= map.get(nh[0]);
+      if (nh[5]) {
+        path.push(nh[5]);
       } else {
-        nn = new MCGSNode(nh[2], !ln.blackToPlay, map, nh[5], seen).U;
+        nh[5] = new MCGSNode(nh[2], !ln.blackToPlay, map, seen);
+        nn = nh[5].U;
         break;
       }
     }
@@ -389,11 +377,8 @@ function getMoves(board, seen_hashes = []) {
       for (let c of node.children) {
         s += c[1] * (map.get(c[0])?.Q ?? 0);
       }
-      // this is maybe not exactly right - we should
-      // only consider it if it actually is double pass
-      // but it's close enough
       if (node.DP) {
-        s += node.DP[1] * map.get(node.DP[0])?.U ?? 0;
+        s += node.DP[1] * node.DP[5];
       }
       node.Q = (node.U + s) / node.N;
       node.S += nn;
@@ -406,7 +391,7 @@ function getMoves(board, seen_hashes = []) {
   }
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
   for (let c of children) {
-    c[2] = map.get(c[0])?.Q ?? 0;
+    c[2] = c[5]?.Q ?? 0;
   }
   return [root.Q, root.getcPUCT(), children];
 }
@@ -489,9 +474,19 @@ export async function main(ns) {
   /* testing code
   ns.clearLog()
   // analyze current game state
-  let seen = ns.go.getMoveHistory().reverse().map((x,i)=>zobristHash(x,i%2 == 0));
-  seen.push(zobristHash(ns.go.getBoardState(), true));
-  let [q,s,moves] = await getMoves(ns.go.getBoardState(), seen);
+  // let seen = ns.go.getMoveHistory().reverse().map((x,i)=>zobristHash(x,i%2 == 0));
+  // seen.push(zobristHash(ns.go.getBoardState(), true));
+  // let [q,s,moves] = await getMoves(ns.go.getBoardState(), seen);
+  let bord = [
+    'X.X.X',
+    'XXXXX',
+    'X.OOO',
+    'OOOO.',
+    'OO...'
+  ];
+  let seen = [];
+  let [q,s,moves] = await getMoves(bord, seen);
+
   for (let [h, n, q, m] of moves) {
     ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
     if (seen.includes(h) && m) {
