@@ -228,15 +228,17 @@ class MCGSNode {
                 }
               }
               if (board[x + dx]?.[y + dy] == 'X' && !istsuke) {
-                let hane_clamp = false;
-                for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-                  if (board[x + dx + ddx]?.[y + dy + ddy] == 'O') {
-                    hane_clamp = true;
+                if (liberties[x+dx][y+dy] == 2) {
+                  istsuke = true;  // always consider atari
+                } else {
+                  let hane_clamp = false;
+                  for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                    if (board[x + dx + ddx]?.[y + dy + ddy] == 'O') {
+                      hane_clamp = true;
+                    }
                   }
+                  istsuke = hane_clamp;
                 }
-                istsuke = hane_clamp;
-                // i believe ai only plays tsuke if it
-                // is nobi, hane or clamp
               }
               if (board[x + dx]?.[y + dy] == 'O') {
                 isnobi = true;
@@ -507,14 +509,16 @@ export async function main(ns) {
       }
       lastMove = await ns.go.makeMove(2, 2);
     }
+    let lastScore = 0;
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
-        // end the game if there are no white stones left
-        if (!ns.go.getBoardState().join('').includes('O')) {
+        let {whiteScore, komi} = ns.go.getGameState();
+        if (whiteScore == komi) {
           await ns.go.passTurn();
           break;
         }
       }
+      lastScore = ns.go.getGameState().whiteScore;
       // testing code
       let seen = ns.go.getMoveHistory().reverse().map((x, i) => zobristHash(x, i % 2 == 0));
       seen.push(zobristHash(ns.go.getBoardState(), true));
