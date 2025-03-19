@@ -535,7 +535,10 @@ export async function main(ns) {
       let moved = false;
       let passq = 0;
       // sweeps a bug under the carpet (fails to recognize some moves as illegal sometimes?)
-      if (q < 2) continue;
+      if (q < 2) {
+        lastMove = await ns.go.passTurn();
+        seen_hashes.push(zobristHash(ns.go.getBoardState(), false))
+      }
       for (let [h, n, q, m] of moves) {
         if (!m) {
           passq = q;
