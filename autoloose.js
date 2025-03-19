@@ -9,8 +9,20 @@ const BITMASKS =
     1260498195, 1415842264, -1897880285, -273553814, 1944522789,
     599390262, 1033445011, -937107540, 1168511328, 1158173073,
     894866539, 1807160375, -599589627, 498624852, -1271883029]
+
+// Maximum number of playouts to use for MCGS
 const PLAYOUTS = 10000;
+
+// Hand tuned value for MCGS exploration
 const EXPLORATION_PARAMETER = 0.3;
+
+// If true, white's play in the MCGS is modified to
+// account for some AI biases
+const USE_AI_TWEAKS = true;
+
+// If true, resets boards where AI starts with [2,2]
+// and always plays [2,2] as the first move
+const RESET_FOR_TENGEN = true;
 
 /** @param {string[][] | string[]} board
   * @param {boolean} blackToPlay */
@@ -185,24 +197,58 @@ class MCGSNode {
    * @param {string[][]} board
    * @param {boolean} blackToPlay
    * @param {Map<number, MCGSNode>} map
-   * @param {Set<number>} history only used for fast playout
+   * @param {number[][]} liberties the result of getLibertiesLite(board)
+   * @param {Set<number>} history hashes of previous game states, used for superko detection
    */
-  constructor(board, blackToPlay, map, history) {
+  constructor(board, blackToPlay, map, liberties, history) {
     this.board = board;
     this.blackToPlay = blackToPlay;
     this.hash = zobristHash(board, blackToPlay);
 
-    //let bb = board.map(x => x.join(''));
-    //let liberties = this.ns.go.analysis.getLiberties(bb);
-    let liberties = getLibertiesLite(board);
-    /** @type [number, number, string[][], [number,number]|null][] */
-    this.children = [[this.hash ^ BITMASKS[50], 0, board, null]];
+    /** @type [number, number, string[][], [number,number]|null, number, number[][]][] */
+    this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 1, liberties]];
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
         let np = addMove(board, liberties, x, y, blackToPlay);
         if (!np) continue;
+        let nl = getLibertiesLite(np, !blackToPlay);
         let hash = zobristHash(np, !blackToPlay);
-        this.children.push([hash, 0, np, [x, y]]);
+        let weight = 1;
+        if (USE_AI_TWEAKS) {
+          if (!blackToPlay) {
+            let noadj = true;
+            let selfatari = (nl[x][y] == 1);
+            for (let [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
+              if (liberties[x+dx]?.[y+dy] == 1) {
+                if (board[x+dx][y+dy] == 'O') weight = 10;  // self atari will be caught later
+                else {
+                  // AI loves captures
+                  weight = 10;
+                  // it will ignore self atari to capture, even if that causes a snapback
+                  selfatari = false;
+                }
+              }
+              if (liberties[x+dx]?.[y+dy] == 2 &&
+                  board[x+dx][y+dy] == 'X') {
+                // AI likes to play atari too, though it does usually check for self
+                // atari (there are situations where it doesn't but they shouldn't matter)
+                weight = 10;
+              }
+              if (board[x+dx]?.[y+dy] == 'X' || board[x+dx]?.[y+dy] == 'O') {
+                noadj = false;
+              }
+            }
+            // AI strongly prefers playing next to another stone, except
+            // for 2-space jumps, which i abstract here as having 4 liberties
+            // because i can't be bothered to check
+            // (it actually prefers playing next to its *OWN* stones except
+            // that it sometimes plays hane/kosumi but again, can't be bothered)
+            if (noadj && nl[x][y] != 4) weight = 0.01;
+            // AI really hates self atari
+            if (selfatari) weight = 0.01;
+          }
+        }
+        this.children.push([hash, 0, np, [x, y], weight, nl]);
       }
     }
     map.set(this.hash, this);
@@ -255,7 +301,7 @@ function getMoves(board, seen_hashes = []) {
   let b = board.map(x => [...x]);
 
   let map = new Map();
-  let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]));
+  let root = new MCGSNode(b, true, map, getLibertiesLite(b), new Set([zobristHash(b, true)]));
   for (let i = 0; i < PLAYOUTS; ++i) {
     if (i % 2000 == 1999) {
       // Terminate early if one move is overwhelmingly preferred, or already guaranteed to win
@@ -298,11 +344,16 @@ function getMoves(board, seen_hashes = []) {
           }
           continue;
         }
-        let score = (ln.blackToPlay ? 1 : -1) *
+        let score =
+          ((ln.blackToPlay ? 1 : -1) *
           (map.get(c[0])?.Q ?? ln.Q) +
           (EXPLORATION_PARAMETER *
             (map.get(c[0])?.getcPUCT?.() ?? 25) // child node's variance
-            * Math.sqrt(ln.N) / (1 + c[1]));
+            * Math.sqrt(ln.N) / (1 + c[1])));
+        if (USE_AI_TWEAKS && !ln.blackToPlay) {
+          if (c[4] < 1) continue;
+          score += c[4];
+        }
         if (score > bestScore) {
           bestScore = score;
           bestCount = 1;
@@ -325,7 +376,7 @@ function getMoves(board, seen_hashes = []) {
       if (map.has(nh[0])) {
         path.push(map.get(nh[0]));
       } else {
-        nn = new MCGSNode(nh[2], !ln.blackToPlay, map, seen).U;
+        nn = new MCGSNode(nh[2], !ln.blackToPlay, map, nh[5], seen).U;
         break;
       }
     }
@@ -434,24 +485,36 @@ export async function main(ns) {
   }
 
   /* testing code
-  let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
   ns.clearLog()
-
+  // analyze current game state
+  let seen = ns.go.getMoveHistory().reverse().map((x,i)=>zobristHash(x,i%2 == 0));
+  seen.push(zobristHash(ns.go.getBoardState(), true));
   let [q,s,moves] = await getMoves(ns.go.getBoardState(), seen);
   for (let [h, n, q, m] of moves) {
-    ns.print(m, ' N = ', n, ' Q = ', q, ' H = ', h);
+    ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
+    if (seen.includes(h) && m) {
+      ns.print('illegal due to superko rule')
+    }
   }
-  // ns.print(zobristHash(pbord, false));
   return;
   //*/
 
   let start = Date.now();
-  for (let i = 0; i < 100; ++i) {
-    do {
-      ns.go.resetBoardState('Illuminati', 5);
-    } while (ns.go.getBoardState()[2][2] != '.');
-
-    let lastMove = await ns.go.makeMove(2,2);
+  let wins = 0;
+  for (let i = 0; i < 1000; ++i) {
+    let lastMove = {};
+    let seen_hashes = [];
+    ns.go.resetBoardState('Illuminati', 5);
+    if (RESET_FOR_TENGEN) {
+      while (ns.go.getBoardState()[2][2] != '.') {
+        ns.go.resetBoardState('Illuminati', 5);
+      }
+      let b = ns.go.getBoardState().map(x=>[...x])
+      seen_hashes.push(zobristHash(b, true));
+      b[2] = 'X';
+      seen_hashes.push(zobristHash(b, false));
+      lastMove = await ns.go.makeMove(2, 2);
+    }
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
         // end the game if there are no white stones left
@@ -460,10 +523,10 @@ export async function main(ns) {
           break;
         }
       }
+      seen_hashes.push(zobristHash(ns.go.getBoardState(), true));
       let q, s, moves;
       try {
-        [q, s, moves] = await getMoves(ns.go.getBoardState(), 
-        ns.go.getMoveHistory().map(x=>zobristHash(x, false)));
+        [q, s, moves] = await getMoves(ns.go.getBoardState(), seen_hashes);
       } catch {
         ns.print('getMoves failed; exiting');
         return;
@@ -471,21 +534,31 @@ export async function main(ns) {
       ns.print('Q: ', q, ' S: ', s);
       let moved = false;
       let passq = 0;
+      // sweeps a bug under the carpet (fails to recognize some moves as illegal sometimes?)
+      if (q < 2) continue;
       for (let [h, n, q, m] of moves) {
         if (!m) {
           passq = q;
           continue;
         }
-          if (n && q > passq - 1) {
-            lastMove = await ns.go.makeMove(...m);
-            moved = true;
-            break;
-          }
+        if (seen_hashes.includes(h)) {
+          continue;
+        }
+        if (n && q > passq - 2) {
+          lastMove = await ns.go.makeMove(...m);
+          seen_hashes.push(h);
+          moved = true;
+          break;
+        }
       }
       if (!moved) {
         lastMove = await ns.go.passTurn();
+        seen_hashes.push(zobristHash(ns.go.getBoardState(), false))
       }
     }
+    let {blackScore, whiteScore, komi} = ns.go.getGameState();
+    if (blackScore > whiteScore + komi) wins++;
+    ns.ui.setTailTitle(wins + ' wins of ' + (i+1) + ' games')
     await ns.asleep(0);
   }
   ns.print('Average game time was ', (Date.now() - start) / 100000, 'seconds');
