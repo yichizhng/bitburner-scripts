@@ -216,35 +216,37 @@ class MCGSNode {
         let weight = 1;
         if (USE_AI_TWEAKS) {
           if (!blackToPlay) {
-            let noadj = true;
+            let isnobi = false;
+            let istsuke = false;
             let selfatari = (nl[x][y] == 1);
-            for (let [dx, dy] of [[-1,0],[1,0],[0,-1],[0,1]]) {
-              if (liberties[x+dx]?.[y+dy] == 1) {
-                if (board[x+dx][y+dy] == 'O') weight = 10;  // self atari will be caught later
-                else {
+            for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+              if (liberties[x + dx]?.[y + dy] == 1) {
+                weight = 10;
+                if (board[x + dx][y + dy] == 'X') {
                   // AI loves captures
-                  weight = 10;
+                  istsuke = true;
                   // it will ignore self atari to capture, even if that causes a snapback
                   selfatari = false;
                 }
               }
-              if (liberties[x+dx]?.[y+dy] == 2 &&
-                  board[x+dx][y+dy] == 'X') {
-                // AI likes to play atari too, though it does usually check for self
-                // atari (there are situations where it doesn't but they shouldn't matter)
-                weight = 10;
+              if (board[x + dx]?.[y + dy] == 'X' && !istsuke) {
+                let hane_clamp = false;
+                for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                  if (board[x + dx + ddx]?.[y + dy + ddy] == 'O') {
+                    hane_clamp = true;
+                  }
+                }
+                istsuke = hane_clamp;
+                // i believe ai only plays tsuke if it
+                // is nobi, hane or clamp
               }
-              if (board[x+dx]?.[y+dy] == 'X' || board[x+dx]?.[y+dy] == 'O') {
-                noadj = false;
+              if (board[x + dx]?.[y + dy] == 'O') {
+                isnobi = true;
               }
             }
-            // AI strongly prefers playing next to another stone, except
-            // for 2-space jumps, which i abstract here as having 4 liberties
-            // because i can't be bothered to check
-            // (it actually prefers playing next to its *OWN* stones except
-            // that it sometimes plays hane/kosumi but again, can't be bothered)
-            if (noadj && nl[x][y] != 4) weight = 0.01;
-            // AI really hates self atari
+            if ((!isnobi) && (!istsuke) && nl[x][y] != 4) weight = 0.01;
+            // AI hates self atari, except in some cases where it's a bad
+            // move anyway; it won't throw in to destroy eye shape
             if (selfatari) weight = 0.01;
           }
         }
@@ -346,10 +348,10 @@ function getMoves(board, seen_hashes = []) {
         }
         let score =
           ((ln.blackToPlay ? 1 : -1) *
-          (map.get(c[0])?.Q ?? ln.Q) +
-          (EXPLORATION_PARAMETER *
-            (map.get(c[0])?.getcPUCT?.() ?? 25) // child node's variance
-            * Math.sqrt(ln.N) / (1 + c[1])));
+            (map.get(c[0])?.Q ?? ln.Q) +
+            (EXPLORATION_PARAMETER *
+              (map.get(c[0])?.getcPUCT?.() ?? 25) // child node's variance
+              * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
           if (c[4] < 1) continue;
           score += c[4];
@@ -365,7 +367,7 @@ function getMoves(board, seen_hashes = []) {
           }
         }
       }
-      
+
       // Update node statistics
       ln.N++;
       nh[1]++;
@@ -427,10 +429,10 @@ function scoreTerminal(position, immediate) {
       if (position[x][y] == '.') {
         let bn = false, wn = false;
         for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          if (position[x+dx]?.[y+dy] == 'X') {
+          if (position[x + dx]?.[y + dy] == 'X') {
             bn = true;
           }
-          if (position[x+dx]?.[y+dy] == 'O') {
+          if (position[x + dx]?.[y + dy] == 'O') {
             wn = true;
           }
         }
@@ -444,7 +446,7 @@ function scoreTerminal(position, immediate) {
       }
     }
   }
-  if (immediate){
+  if (immediate) {
     return bc + bl;
   }
 
@@ -468,20 +470,20 @@ export async function main(ns) {
   onmessage = function(e) {
     postMessage(getMoves(...e.data));
   }`;
-  let blob = new Blob([worker_script], {type: 'text/javascript'});
+  let blob = new Blob([worker_script], { type: 'text/javascript' });
   let url = URL.createObjectURL(blob);
   let worker = new Worker(url);
   let resolve;
-  worker.onmessage = function(e) {
+  worker.onmessage = function (e) {
     resolve?.(e.data);
   }
   ns.atExit(() => worker.terminate(), 'worker');
-  let getMoves = function(d, m) {
+  let getMoves = function (d, m) {
     return new Promise((res, rej) => {
-	    ns.atExit(rej, 'worker_promise')
-	    resolve = res;
+      ns.atExit(rej, 'worker_promise')
+      resolve = res;
       worker.postMessage([d, m]);
-	  });
+    });
   }
 
   /* testing code
@@ -503,16 +505,11 @@ export async function main(ns) {
   let wins = 0;
   for (let i = 0; i < 1000; ++i) {
     let lastMove = {};
-    let seen_hashes = [];
     ns.go.resetBoardState('Illuminati', 5);
     if (RESET_FOR_TENGEN) {
       while (ns.go.getBoardState()[2][2] != '.') {
         ns.go.resetBoardState('Illuminati', 5);
       }
-      let b = ns.go.getBoardState().map(x=>[...x])
-      seen_hashes.push(zobristHash(b, true));
-      b[2] = 'X';
-      seen_hashes.push(zobristHash(b, false));
       lastMove = await ns.go.makeMove(2, 2);
     }
     while (lastMove.type != 'gameOver') {
@@ -523,12 +520,14 @@ export async function main(ns) {
           break;
         }
       }
-      seen_hashes.push(zobristHash(ns.go.getBoardState(), true));
+      // testing code
+      let seen = ns.go.getMoveHistory().reverse().map((x, i) => zobristHash(x, i % 2 == 0));
+      seen.push(zobristHash(ns.go.getBoardState(), true));
+
       let q, s, moves;
       try {
-        [q, s, moves] = await getMoves(ns.go.getBoardState(), seen_hashes);
+        [q, s, moves] = await getMoves(ns.go.getBoardState(), seen);
       } catch {
-        ns.print('getMoves failed; exiting');
         return;
       }
       ns.print('Q: ', q, ' S: ', s);
@@ -537,31 +536,27 @@ export async function main(ns) {
       // sweeps a bug under the carpet (fails to recognize some moves as illegal sometimes?)
       if (q < 2) {
         lastMove = await ns.go.passTurn();
-        seen_hashes.push(zobristHash(ns.go.getBoardState(), false))
+        continue;
       }
       for (let [h, n, q, m] of moves) {
         if (!m) {
           passq = q;
           continue;
         }
-        if (seen_hashes.includes(h)) {
-          continue;
-        }
         if (n && q > passq - 2) {
           lastMove = await ns.go.makeMove(...m);
-          seen_hashes.push(h);
           moved = true;
           break;
         }
       }
       if (!moved) {
         lastMove = await ns.go.passTurn();
-        seen_hashes.push(zobristHash(ns.go.getBoardState(), false))
       }
     }
-    let {blackScore, whiteScore, komi} = ns.go.getGameState();
-    if (blackScore > whiteScore + komi) wins++;
-    ns.ui.setTailTitle(wins + ' wins of ' + (i+1) + ' games')
+    let { blackScore, whiteScore } = ns.go.getGameState();
+    if (blackScore > whiteScore) wins++;
+    ns.print(blackScore, ' - ', whiteScore)
+    ns.ui.setTailTitle(wins + ' wins of ' + (i + 1) + ' games')
     await ns.asleep(0);
   }
   ns.print('Average game time was ', (Date.now() - start) / 100000, 'seconds');
