@@ -10,7 +10,7 @@ const BITMASKS =
     599390262, 1033445011, -937107540, 1168511328, 1158173073,
     894866539, 1807160375, -599589627, 498624852, -1271883029]
 const PLAYOUTS = 10000;
-const EXPLORATION_PARAMETER = 0.22;
+const EXPLORATION_PARAMETER = 0.3;
 
 /** @param {string[][]} board
   * @param {boolean} blackToPlay */
@@ -334,6 +334,9 @@ async function getMoves(board) {
       for (let c of node.children) {
         s += c[1] * (map.get(c[0])?.Q ?? 0);
       }
+      // this is maybe not exactly right - we should
+      // only consider it if it actually is double pass
+      // but it's close enough
       if (node.DP) {
         s += node.DP[1] * map.get(node.DP[0])?.U ?? 0;
       }
@@ -346,7 +349,6 @@ async function getMoves(board) {
   for (let c of children) {
     c[2] = map.get(c[0])?.Q ?? 0;
   }
-  console.log(map.get(root.children[0][0]))
   return [root.Q, root.getcPUCT(), children];
 }
 
@@ -400,23 +402,33 @@ export async function main(ns) {
   ns.disableLog('asleep');
   ns.clearLog();
 
-  //* board testing
-  let sekibord =
-    [
-      'XXXXX',
-      '.XXX.',
-      'OOOXX',
-      'O.OX.',
-      'OOOXX',
-    ].map(x => [...x]);
-  let [q, s, moves] = await getMoves(sekibord);
-  for (let m of moves) {
-    ns.print(m[3] ? moveName(...m[3]) : 'pass');
-    ns.print('N: ', m[1], ' Q: ', m[2])
+  if (!Worker) {
+    ns.print('Please get a real browser');
+    ns.exit();
   }
-  ns.print('Q: ', q, ' S: ', s)
-  return;
-  //*/
+
+  let worker_script = ns.read(ns.getScriptName()).split('export')[0] + `
+  onmessage = function(e) {
+    getMoves(e.data).then(r => {
+      postMessage(r);
+    });
+  }`;
+  let blob = new Blob([worker_script], {type: 'module'});
+  let url = URL.createObjectURL(blob);
+  let worker = new Worker(url);
+  let resolve;
+  worker.onmessage = function(e) {
+    resolve?.(e.data);
+  }
+  ns.atExit(() => worker.terminate(), 'worker');
+  let getMoves = function(d) {
+    return new Promise((res, rej) => {
+	    ns.atExit(rej, 'worker_promise')
+	    resolve = res;
+      worker.postMessage(d);
+	  });
+  }
+
   let start = Date.now();
   l: for (let i = 0; i < 100; ++i) {
     do {
