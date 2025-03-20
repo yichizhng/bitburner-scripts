@@ -315,7 +315,7 @@ class MCGSNode {
               weight = 100;
             } else if (isdefend && neighborliberties + emptycount > 2) {
               weight = 80;
-            } else if (makesEye) {
+            } else if (makesEye && neighborliberties + emptycount > 2) {
               weight = 60;
             } else if (isatari && neighborliberties + emptycount > 2) {
               weight = 40;
