@@ -24,6 +24,7 @@ const USE_AI_TWEAKS = true;
 // and always plays [2,2] as the first move
 const RESET_FOR_TENGEN = false;
 
+// Switch for debugging
 const ANALYSIS_MODE = false;
 
 /** @param {string[][] | string[]} board
@@ -199,6 +200,7 @@ function moveName(x, y) {
  */
 function countWhiteEyes(board) {
   let eyeCount = 0;
+  let wc = board.map(x=>x.map(()=>false));
   let checked = board.map(x=>x.map(()=>false));
   for (let x = 0; x < 5; ++x) {
     for (let y = 0; y < 5; ++y) {
@@ -226,12 +228,15 @@ function countWhiteEyes(board) {
         if (checked[x][y] !== false) continue;
         checked[x][y] = chainID;
         let eye = [[x,y]];
-        let isEye = true;
+        let isEye = true, isControlled = true;
         for (let i = 0; i < eye.length; ++i) {
           let [xx,yy] = eye[i];
           for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
             if (checked[xx+dx]?.[yy+dy] !== false) continue;
-            if (board[xx+dx]?.[yy+dy] == 'X') isEye = false;
+            if (board[xx+dx]?.[yy+dy] == 'X') {
+              isEye = false;
+              isControlled = false;
+            }
             if (board[xx+dx]?.[yy+dy] == '.') {
               checked[xx+dx][yy+dy] = chainID;
               eye.push([xx+dx,yy+dy]);
@@ -246,12 +251,16 @@ function countWhiteEyes(board) {
           }
         }
         if (eye.length > 11) isEye = false;
+        if (isControlled) {
+          for (let [xx,yy] of eye) {
+            wc[xx][yy] = true;
+          }
+        }
         if (isEye) eyeCount++;
       }
-
     }
   }
-  return eyeCount;
+  return [eyeCount, wc];
 }
 
 class MCGSNode {
@@ -271,7 +280,7 @@ class MCGSNode {
     /** @type [number, number, string[][], [number,number]|null, number, MCGSNode|null][] */
     this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 1, null]];
 
-    let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyes(board);
+    let we = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyes(board);
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
         let np = addMove(board, liberties, x, y, blackToPlay);
@@ -280,6 +289,7 @@ class MCGSNode {
         let weight = 1;
         if (USE_AI_TWEAKS) {
           if (!blackToPlay) {
+            let [whiteEyes, wc] = we;
             let isatari = false;
             let iscapture = false;
             let isdefend = false;
@@ -308,7 +318,7 @@ class MCGSNode {
             if (!iscapture) {
               let nb = board.map(x=>[...x]);
               nb[x][y] = 'O';
-              let newWhiteEyes = countWhiteEyes(nb);
+              let [newWhiteEyes] = countWhiteEyes(nb);
               if (newWhiteEyes > whiteEyes) makesEye = true;
             }
 
@@ -316,7 +326,7 @@ class MCGSNode {
               weight = 100;
             } else if (isdefend && neighborliberties + emptycount > 2) {
               weight = 80;
-            } else if (makesEye && emptycount > 0) {
+            } else if (makesEye && !wc[x][y]) {
               weight = 60;
             } else if (isatari && neighborliberties + emptycount > 2) {
               weight = 40;
@@ -554,12 +564,13 @@ export async function main(ns) {
   ns.clearLog()
   ns.ui.setTailTitle('Analysis mode')
   // analyze current game state
-  // let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
-  // let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
+  let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
+  let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
   
-  let bord = [".....","O.XOX",".OOX.","O.OX.",".O..."];
-  let seen = [];
-  let [q,s,moves] = await getMoves(bord, seen);
+  // analyze board
+  // let bord = [".....",".XXX.",".XOO#",".OO..","O.O.."];
+  // let seen = [];
+  // let [q,s,moves] = await getMoves(bord, seen);
 
   for (let [h, n, q, m] of moves) {
     ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
@@ -601,7 +612,7 @@ export async function main(ns) {
       ns.print('Q: ', q, ' S: ', s);
       let moved = false;
       let passq = 0;
-      if (q < prevq - 2) {
+      if (q < prevq - 4) {
         ns.tprint('blunder detected');
         ns.tprint(prevboard);
         ns.tprint(ns.go.getBoardState())
