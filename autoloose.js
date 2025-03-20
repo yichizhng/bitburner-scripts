@@ -14,15 +14,15 @@ const BITMASKS =
 const PLAYOUTS = 10000;
 
 // Hand tuned value for MCGS exploration
-const EXPLORATION_PARAMETER = 0.2;
+const EXPLORATION_PARAMETER = 0.3;
 
 // If true, white's play in the MCGS is modified to
 // account for some AI biases
-const USE_AI_TWEAKS = false;
+const USE_AI_TWEAKS = true;
 
 // If true, resets boards where AI starts with [2,2]
 // and always plays [2,2] as the first move
-const RESET_FOR_TENGEN = true;
+const RESET_FOR_TENGEN = false;
 
 /** @param {string[][] | string[]} board
   * @param {boolean} blackToPlay */
@@ -169,7 +169,7 @@ function fastPlayout(position, blackToPlay, history, ns) {
         if (fillsEye) continue;
         let nc = addMove(position, liberties, x, y, blackToPlay);
         if (!nc) continue;
-        let hash = zobristHash(nc, !blackToPlay);
+        let hash = zobristHash(nc, false);
         if (history.has(hash)) continue;
         moves.push(nc);
       }
@@ -183,13 +183,65 @@ function fastPlayout(position, blackToPlay, history, ns) {
     }
     position = np;
     blackToPlay = !blackToPlay;
-    history.add(zobristHash(position, blackToPlay));
+    history.add(zobristHash(position, false));
   }
   return scoreTerminal(position, false);
 }
 
 function moveName(x, y) {
   return 'ABCDE'[x] + (y + 1);
+}
+
+/**
+ * @param {string[][]} board
+ */
+function countWhiteEyes(board) {
+  let eyeCount = 0;
+  let checked = board.map(x=>x.map(()=>false));
+  for (let x = 0; x < 5; ++x) {
+    for (let y = 0; y < 5; ++y) {
+      let chainID = 5*x + y + 1;
+      if (checked[x][y] || board[x][y] != 'O') continue;
+      let chain = [[x,y]];
+      let liberties = [];
+      for (let i = 0; i < chain.length; ++i) {
+        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          if (checked[x+dx]?.[y+dy] !== false) continue;
+          if (board[x+dx]?.[y+dy] == 'O') {
+            chain.push([x+dx,y+dy]);
+            checked[x+dx][y+dy] = chainID;
+          } else if (board[x+dx]?.[y+dy] == '.') {
+            if (checked[x+dx][y+dy]) continue;
+            // if it was already checked by another chain, it
+            // isn't an eye
+            liberties.push([x+dx,y+dy]);
+          }
+        }
+      }
+      for (let [x,y] of liberties) {
+        let eye = [[x,y]];
+        let isEye = true;
+        for (let i = 0; i < eye.length; ++i) {
+          for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            if (checked[x+dx]?.[y+dy] !== false) continue;
+            if (board[x+dx]?.[y+dy] == 'X') isEye = false;
+            if (board[x+dx]?.[y+dy] == '.') {
+              checked[x+dx][y+dy] = chainID;
+              eye.push([x+dx,y+dy]);
+            }
+            if (board[x+dx]?.[y+dy] == 'O') {
+              // the AI doesn't believe in shared eyes (okay, well, it
+              // does in one case, but that case basically doesn't come up)
+              if (checked[x+dx][y+dy] != chainID) isEye = false;
+            }
+          }
+        }
+        if (isEye) eyeCount++;
+      }
+
+    }
+  }
+  return eyeCount;
 }
 
 class MCGSNode {
@@ -208,29 +260,30 @@ class MCGSNode {
 
     /** @type [number, number, string[][], [number,number]|null, number, MCGSNode|null][] */
     this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 1, null]];
+
+    let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyes(board);
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
         let np = addMove(board, liberties, x, y, blackToPlay);
         if (!np) continue;
-        // let nl = getLibertiesLite(np, !blackToPlay);
         let hash = zobristHash(np, !blackToPlay);
         let weight = 1;
         if (USE_AI_TWEAKS) {
           if (!blackToPlay) {
             let isnobi = false;
             let istsuke = false;
+            let isatari = false;
+            let iscapture = false;
+            let isdefend = false;
+            let emptycount = 0;
+            let neighborliberties = 1;
             for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-              if (liberties[x + dx]?.[y + dy] == 1) {
-                weight = 10;
-                if (board[x + dx][y + dy] == 'X') {
-                  // AI loves captures
-                  istsuke = true;
-                }
-              }
-              if (board[x + dx]?.[y + dy] == 'X' && !istsuke) {
+              if (board[x + dx]?.[y + dy] == 'X') {
                 if (liberties[x+dx][y+dy] == 2) {
-                  istsuke = true;  // always consider atari
-                } else {
+                  isatari = true;
+                } else if (liberties[x+dx][y+dy] == 1) {
+                  iscapture = true;
+                } else if (!istsuke) {
                   let hane_clamp = false;
                   for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
                     if (board[x + dx + ddx]?.[y + dy + ddy] == 'O') {
@@ -242,17 +295,37 @@ class MCGSNode {
               }
               if (board[x + dx]?.[y + dy] == 'O') {
                 isnobi = true;
-              }
-            }
-            if ((!isnobi) && (!istsuke)) {
-              let isjump = true;
-              // AI will play jumps but only with 4 liberties
-              for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-                if (board[x+dx]?.[y+dy] != '.') {
-                  isjump = false; break;
+                if (liberties[x+dx][y+dy] == 1) {
+                  isdefend = true;
+                } else if (liberties[x+dx]?.[y+dy] > neighborliberties) {
+                  neighborliberties = liberties[x+dx][y+dy];
                 }
               }
-              if (!isjump) weight = 0.01;
+              if (board[x + dx]?.[y + dy] == '.') {
+                emptycount++;
+              }
+            }
+            let makesEye = false;
+            if (!iscapture) {
+              let nb = board.map(x=>[...x]);
+              nb[x][y] = 'O';
+              let newWhiteEyes = countWhiteEyes(nb);
+              if (newWhiteEyes > whiteEyes) makesEye = true;
+            }
+
+            if (iscapture) {
+              weight = 100;
+            } else if (isdefend && neighborliberties + emptycount > 2) {
+              weight = 80;
+            } else if (makesEye) {
+              weight = 60;
+            } else if (isatari && neighborliberties + emptycount > 2) {
+              weight = 40;
+            } else if (isnobi || istsuke) {
+              // todo: eyemove actually has higher priority than atari
+              // but those moves tend to be silly so i'm not considering them
+            } else {
+              if (emptycount < 4) weight = 0.01;
             }
             // the ai technically will play placements into big eyes,
             // but only when it's irrelevant and/or too late to matter
@@ -294,18 +367,15 @@ function getMoves(board, seen_hashes = []) {
   let b = board.map(x => [...x]);
 
   let map = new Map();
-  let root = new MCGSNode(b, true, map, new Set([zobristHash(b, true)]));
+  let root = new MCGSNode(b, true, map, new Set([seen_hashes]));
   for (let i = 0; i < PLAYOUTS; ++i) {
     if (i % 2000 == 1999) {
-      // Terminate early if one move is overwhelmingly preferred, or already guaranteed to win
       let c = root.children.reduce((x, y) => y[1] > x[1] ? y : x);
-      if (c[3]) {
-        if (c[1] > 0.9 * i || c[1] >= 0.5 * PLAYOUTS) {
-          break;
-        }
-        // Or if very winning or losing
-        if (root.Q > 20 || root.Q < 4) break;
+      if (c[1] >= 0.5 * PLAYOUTS) {
+        break;
       }
+      if (root.Q > 20 || root.Q < 4) break;
+      if (root.getcPUCT() < 2) break;
     }
     let seen = new Set(seen_hashes);
     seen.add(zobristHash(b, false));
@@ -401,6 +471,15 @@ function getMoves(board, seen_hashes = []) {
   for (let c of children) {
     c[2] = c[5]?.Q ?? 0;
   }
+  /*
+  let refutation = children[0][5]?.children;
+  if (refutation) {
+    refutation.sort((x,y) => y[1] - x[1]);
+    for (let r of refutation) {
+      console.log(r[3] ? moveName(...r[3]) : 'pass', r[1]);
+    }
+  }
+  //*/
   return [root.Q, root.getcPUCT(), children];
 }
 
@@ -481,16 +560,12 @@ export async function main(ns) {
 
   /* testing code
   ns.clearLog()
+  ns.ui.setTailTitle('Analysis mode')
   // analyze current game state
   // let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
   // let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
   
-  let bord = [
-  "XXXXX",
-  "XXXXX",
-  "XX..X",
-  "OOOOO",
-  "OOOOO"];
+  let bord = [".O.O.",".XOOO",".XXX#",".OXO.","..O.O"];
   let seen = [];
   let [q,s,moves] = await getMoves(bord, seen);
 
@@ -514,7 +589,7 @@ export async function main(ns) {
       }
       lastMove = await ns.go.makeMove(2, 2);
     }
-    let lastScore = 0;
+    let prevboard, prevq = 0;
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
         let {whiteScore, komi} = ns.go.getGameState();
@@ -534,6 +609,13 @@ export async function main(ns) {
       ns.print('Q: ', q, ' S: ', s);
       let moved = false;
       let passq = 0;
+      if (q < prevq - 2) {
+        ns.tprint('blunder detected');
+        ns.tprint(prevboard);
+        ns.tprint(ns.go.getBoardState())
+      }
+      prevboard = ns.go.getBoardState();
+      prevq = q;
       // sweeps a bug under the carpet (fails to recognize some moves as illegal sometimes?)
       if (q < 2) {
         lastMove = await ns.go.passTurn();
