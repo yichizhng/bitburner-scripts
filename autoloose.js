@@ -211,7 +211,7 @@ function countWhiteEyes(board) {
         let [xx,yy] = chain[i];
         for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
           if (checked[xx+dx]?.[yy+dy] !== false) continue;
-          if (board[xx+dx]?.[yy+dy] == 'O') {
+          if (board[xx+dx]?.[yy+dy] == 'O' || board[xx+dx]?.[yy+dy] == '#') {
             chain.push([xx+dx,yy+dy]);
             checked[xx+dx][yy+dy] = chainID;
           } else if (board[xx+dx]?.[yy+dy] == '.') {
@@ -236,7 +236,7 @@ function countWhiteEyes(board) {
               checked[xx+dx][yy+dy] = chainID;
               eye.push([xx+dx,yy+dy]);
             }
-            if (board[xx+dx]?.[yy+dy] == 'O') {
+            if (board[xx+dx]?.[yy+dy] == 'O' || board[xx+dx]?.[yy+dy] == '#') {
               // the AI doesn't believe in shared eyes (okay, well, it
               // does in one case, but that case basically doesn't come up)
               if (checked[xx+dx][yy+dy] != chainID) {
@@ -245,6 +245,7 @@ function countWhiteEyes(board) {
             }
           }
         }
+        if (eye.length > 11) isEye = false;
         if (isEye) eyeCount++;
       }
 
@@ -315,7 +316,7 @@ class MCGSNode {
               weight = 100;
             } else if (isdefend && neighborliberties + emptycount > 2) {
               weight = 80;
-            } else if (makesEye && neighborliberties + emptycount > 2) {
+            } else if (makesEye && emptycount > 0) {
               weight = 60;
             } else if (isatari && neighborliberties + emptycount > 2) {
               weight = 40;
@@ -556,9 +557,7 @@ export async function main(ns) {
   // let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
   // let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
   
-  let bord = [".XX..",".OXX.",".OOO#","XX.O.",".O.O."];
-  ns.print(countWhiteEyes(bord.map(x=>[...x])));
-  return;
+  let bord = [".....","O.XOX",".OOX.","O.OX.",".O..."];
   let seen = [];
   let [q,s,moves] = await getMoves(bord, seen);
 
