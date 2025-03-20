@@ -24,6 +24,8 @@ const USE_AI_TWEAKS = true;
 // and always plays [2,2] as the first move
 const RESET_FOR_TENGEN = false;
 
+const ANALYSIS_MODE = false;
+
 /** @param {string[][] | string[]} board
   * @param {boolean} blackToPlay */
 function zobristHash(board, blackToPlay) {
@@ -226,17 +228,18 @@ function countWhiteEyes(board) {
         let eye = [[x,y]];
         let isEye = true;
         for (let i = 0; i < eye.length; ++i) {
+          let [xx,yy] = eye[i];
           for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            if (checked[x+dx]?.[y+dy] !== false) continue;
-            if (board[x+dx]?.[y+dy] == 'X') isEye = false;
-            if (board[x+dx]?.[y+dy] == '.') {
-              checked[x+dx][y+dy] = chainID;
-              eye.push([x+dx,y+dy]);
+            if (checked[xx+dx]?.[yy+dy] !== false) continue;
+            if (board[xx+dx]?.[yy+dy] == 'X') isEye = false;
+            if (board[xx+dx]?.[yy+dy] == '.') {
+              checked[xx+dx][yy+dy] = chainID;
+              eye.push([xx+dx,yy+dy]);
             }
-            if (board[x+dx]?.[y+dy] == 'O') {
+            if (board[xx+dx]?.[yy+dy] == 'O') {
               // the AI doesn't believe in shared eyes (okay, well, it
               // does in one case, but that case basically doesn't come up)
-              if (checked[x+dx][y+dy] != chainID) {
+              if (checked[xx+dx][yy+dy] != chainID) {
                  isEye = false;
               }
             }
@@ -459,7 +462,7 @@ function getMoves(board, seen_hashes = []) {
   for (let c of children) {
     c[2] = c[5]?.Q ?? 0;
   }
-  /*
+  if (ANALYSIS_MODE) {
   let refutation = children[0][5]?.children;
   if (refutation) {
     refutation.sort((x,y) => y[1] - x[1]);
@@ -467,7 +470,7 @@ function getMoves(board, seen_hashes = []) {
       console.log(r[3] ? moveName(...r[3]) : 'pass', r[1], r[4]);
     }
   }
-  //*/
+  }
   return [root.Q, root.getcPUCT(), children];
 }
 
@@ -546,14 +549,16 @@ export async function main(ns) {
     });
   }
 
-  /* testing code
+  if (ANALYSIS_MODE) {
   ns.clearLog()
   ns.ui.setTailTitle('Analysis mode')
   // analyze current game state
   // let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
   // let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
   
-  let bord =[".OX..","OOXXX",".OOO#","OOXX.",".X..."];
+  let bord = [".XX..",".OXX.",".OOO#","XX.O.",".O.O."];
+  ns.print(countWhiteEyes(bord.map(x=>[...x])));
+  return;
   let seen = [];
   let [q,s,moves] = await getMoves(bord, seen);
 
@@ -564,7 +569,7 @@ export async function main(ns) {
     //}
   }
   return;
-  //*/
+  }
 
   let start = Date.now();
   let wins = 0;
