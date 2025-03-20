@@ -459,7 +459,7 @@ function getMoves(board, seen_hashes = []) {
   for (let c of children) {
     c[2] = c[5]?.Q ?? 0;
   }
-  //*
+  /*
   let refutation = children[0][5]?.children;
   if (refutation) {
     refutation.sort((x,y) => y[1] - x[1]);
@@ -546,7 +546,7 @@ export async function main(ns) {
     });
   }
 
-  //* testing code
+  /* testing code
   ns.clearLog()
   ns.ui.setTailTitle('Analysis mode')
   // analyze current game state
