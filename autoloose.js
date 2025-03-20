@@ -270,8 +270,6 @@ class MCGSNode {
         let weight = 1;
         if (USE_AI_TWEAKS) {
           if (!blackToPlay) {
-            let isnobi = false;
-            let istsuke = false;
             let isatari = false;
             let iscapture = false;
             let isdefend = false;
@@ -283,18 +281,9 @@ class MCGSNode {
                   isatari = true;
                 } else if (liberties[x+dx][y+dy] == 1) {
                   iscapture = true;
-                } else if (!istsuke) {
-                  let hane_clamp = false;
-                  for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-                    if (board[x + dx + ddx]?.[y + dy + ddy] == 'O') {
-                      hane_clamp = true;
-                    }
-                  }
-                  istsuke = hane_clamp;
                 }
               }
               if (board[x + dx]?.[y + dy] == 'O') {
-                isnobi = true;
                 if (liberties[x+dx][y+dy] == 1) {
                   isdefend = true;
                 } else if (liberties[x+dx]?.[y+dy] > neighborliberties) {
@@ -321,15 +310,7 @@ class MCGSNode {
               weight = 60;
             } else if (isatari && neighborliberties + emptycount > 2) {
               weight = 40;
-            } else if (isnobi || istsuke) {
-              // todo: eyemove actually has higher priority than atari
-              // but those moves tend to be silly so i'm not considering them
-            } else {
-              if (emptycount < 4) weight = 0.01;
-            }
-            // the ai technically will play placements into big eyes,
-            // but only when it's irrelevant and/or too late to matter
-          }
+            }          }
         }
         this.children.push([hash, 0, np, [x, y], weight, null]);
       }
@@ -565,7 +546,7 @@ export async function main(ns) {
   // let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
   // let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
   
-  let bord = [".O.O.",".XOOO",".XXX#",".OXO.","..O.O"];
+  let bord = ["XXX..",".XXXX","XXOO#","OOO.O","O.OOO"];
   let seen = [];
   let [q,s,moves] = await getMoves(bord, seen);
 
