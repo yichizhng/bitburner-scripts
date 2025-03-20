@@ -206,16 +206,17 @@ function countWhiteEyes(board) {
       let chain = [[x,y]];
       let liberties = [];
       for (let i = 0; i < chain.length; ++i) {
+        let [xx,yy] = chain[i];
         for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-          if (checked[x+dx]?.[y+dy] !== false) continue;
-          if (board[x+dx]?.[y+dy] == 'O') {
-            chain.push([x+dx,y+dy]);
-            checked[x+dx][y+dy] = chainID;
-          } else if (board[x+dx]?.[y+dy] == '.') {
-            if (checked[x+dx][y+dy]) continue;
+          if (checked[xx+dx]?.[yy+dy] !== false) continue;
+          if (board[xx+dx]?.[yy+dy] == 'O') {
+            chain.push([xx+dx,yy+dy]);
+            checked[xx+dx][yy+dy] = chainID;
+          } else if (board[xx+dx]?.[yy+dy] == '.') {
+            if (checked[xx+dx][yy+dy]) continue;
             // if it was already checked by another chain, it
             // isn't an eye
-            liberties.push([x+dx,y+dy]);
+            liberties.push([xx+dx,yy+dy]);
           }
         }
       }
@@ -235,7 +236,9 @@ function countWhiteEyes(board) {
             if (board[x+dx]?.[y+dy] == 'O') {
               // the AI doesn't believe in shared eyes (okay, well, it
               // does in one case, but that case basically doesn't come up)
-              if (checked[x+dx][y+dy] != chainID) isEye = false;
+              if (checked[x+dx][y+dy] != chainID) {
+                 isEye = false;
+              }
             }
           }
         }
@@ -313,7 +316,8 @@ class MCGSNode {
               weight = 60;
             } else if (isatari && neighborliberties + emptycount > 2) {
               weight = 40;
-            }          }
+            }
+          }
         }
         this.children.push([hash, 0, np, [x, y], weight, null]);
       }
@@ -387,7 +391,7 @@ function getMoves(board, seen_hashes = []) {
             continue;
             }
           } else {
-          continue;
+            continue;
           }
         }
         // eagerly update cached child pointer
@@ -455,12 +459,12 @@ function getMoves(board, seen_hashes = []) {
   for (let c of children) {
     c[2] = c[5]?.Q ?? 0;
   }
-  /*
+  //*
   let refutation = children[0][5]?.children;
   if (refutation) {
     refutation.sort((x,y) => y[1] - x[1]);
     for (let r of refutation) {
-      console.log(r[3] ? moveName(...r[3]) : 'pass', r[1]);
+      console.log(r[3] ? moveName(...r[3]) : 'pass', r[1], r[4]);
     }
   }
   //*/
@@ -549,7 +553,7 @@ export async function main(ns) {
   // let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
   // let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
   
-  let bord =["..XO.","..XOO","#.XO.",".XOOX","....."];
+  let bord =[".OX..","OOXXX",".OOO#","OOXX.",".X..."];
   let seen = [];
   let [q,s,moves] = await getMoves(bord, seen);
 
