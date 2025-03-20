@@ -14,7 +14,7 @@ const BITMASKS =
 const PLAYOUTS = 10000;
 
 // Hand tuned value for MCGS exploration
-const EXPLORATION_PARAMETER = 0.3;
+const EXPLORATION_PARAMETER = 0.2;
 
 // If true, white's play in the MCGS is modified to
 // account for some AI biases
@@ -308,17 +308,19 @@ function getMoves(board, seen_hashes = []) {
       }
     }
     let seen = new Set(seen_hashes);
-    seen.add(root.hash);
+    seen.add(zobristHash(b, false));
     let path = [root];
     let nn = 0;  // result of playout
+    let lastPassed = false;
     while (true) {
       let ln = path.at(-1);
       let bestScore = -Infinity;
       let bestCount = 0;
       let nh = ln.children[0];
       for (let c of ln.children) {
-        if (seen.has(c[0])) {
+        if (seen.has(zobristHash(c[2],false))) {
           if (c[3] == null) {
+            if (lastPassed) {
             ln.DP ??= ['t', 0, null, null, 1, scoreTerminal(ln.board, true)];
             let score = (ln.blackToPlay ? 1 : -1) * ln.DP[5];
             // no exploration factor because we know terminal nodes have no variance
@@ -328,8 +330,11 @@ function getMoves(board, seen_hashes = []) {
               nn = ln.DP[5];
               nh = ln.DP;
             }
-          }
+            continue;
+            }
+          } else {
           continue;
+          }
         }
         // eagerly update cached child pointer
         c[5] ??= map.get(c[0]);
@@ -358,11 +363,12 @@ function getMoves(board, seen_hashes = []) {
       // Update node statistics
       ln.N++;
       nh[1]++;
+      lastPassed = !nh[3];
       if (typeof nh[0] == 'string') {
         nn = nh[5];
         break;
       }
-      seen.add(nh[0]);
+      seen.add(zobristHash(nh[2], false));
       nh[5] ??= map.get(nh[0]);
       if (nh[5]) {
         path.push(nh[5]);
@@ -476,24 +482,23 @@ export async function main(ns) {
   /* testing code
   ns.clearLog()
   // analyze current game state
-  // let seen = ns.go.getMoveHistory().reverse().map((x,i)=>zobristHash(x,i%2 == 0));
-  // seen.push(zobristHash(ns.go.getBoardState(), true));
-  // let [q,s,moves] = await getMoves(ns.go.getBoardState(), seen);
+  // let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
+  // let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
+  
   let bord = [
-    'X.X.X',
-    'XXXXX',
-    'X.OOO',
-    'OOOO.',
-    'OO...'
-  ];
+  "XXXXX",
+  "XXXXX",
+  "XX..X",
+  "OOOOO",
+  "OOOOO"];
   let seen = [];
   let [q,s,moves] = await getMoves(bord, seen);
 
   for (let [h, n, q, m] of moves) {
     ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
-    if (seen.includes(h) && m) {
-      ns.print('illegal due to superko rule')
-    }
+    //if (seen.includes(h) && m) {
+    //  ns.print('illegal due to superko rule')
+    //}
   }
   return;
   //*/
@@ -518,10 +523,7 @@ export async function main(ns) {
           break;
         }
       }
-      lastScore = ns.go.getGameState().whiteScore;
-      // testing code
-      let seen = ns.go.getMoveHistory().reverse().map((x, i) => zobristHash(x, i % 2 == 0));
-      seen.push(zobristHash(ns.go.getBoardState(), true));
+      let seen = ns.go.getMoveHistory().map((x, i) => zobristHash(x, false));
 
       let q, s, moves;
       try {
@@ -543,7 +545,11 @@ export async function main(ns) {
           continue;
         }
         if (n && q > passq - 2) {
-          lastMove = await ns.go.makeMove(...m);
+          try {
+            lastMove = await ns.go.makeMove(...m);
+          } catch {
+            continue;
+          }
           moved = true;
           break;
         }
