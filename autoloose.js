@@ -202,6 +202,7 @@ function countWhiteEyes(board) {
     for (let y = 0; y < 5; ++y) {
       let chainID = 5*x + y + 1;
       if (checked[x][y] || board[x][y] != 'O') continue;
+      checked[x][y] = chainID;
       let chain = [[x,y]];
       let liberties = [];
       for (let i = 0; i < chain.length; ++i) {
@@ -219,6 +220,8 @@ function countWhiteEyes(board) {
         }
       }
       for (let [x,y] of liberties) {
+        if (checked[x][y] !== false) continue;
+        checked[x][y] = chainID;
         let eye = [[x,y]];
         let isEye = true;
         for (let i = 0; i < eye.length; ++i) {
@@ -539,14 +542,14 @@ export async function main(ns) {
     });
   }
 
-  /* testing code
+  //* testing code
   ns.clearLog()
   ns.ui.setTailTitle('Analysis mode')
   // analyze current game state
   // let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
   // let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
   
-  let bord = ["XXX..",".XXXX","XXOO#","OOO.O","O.OOO"];
+  let bord =["..XO.","..XOO","#.XO.",".XOOX","....."];
   let seen = [];
   let [q,s,moves] = await getMoves(bord, seen);
 
