@@ -11,7 +11,7 @@ const BITMASKS =
     894866539, 1807160375, -599589627, 498624852, -1271883029]
 
 // Maximum number of playouts to use for MCGS
-const PLAYOUTS = 30000;
+const PLAYOUTS = 10000;
 
 // Hand tuned value for MCGS exploration
 const EXPLORATION_PARAMETER = 0.3;
@@ -256,7 +256,7 @@ function fastPlayoutLinear(board, blackToPlay, history) {
   let lastPassed = false;
   for (let i = 0; i < 30; ++i) {
     // pick a non-dumb move at random, defaulting to pass
-    // (a move is dumb if it fills in an eye for no reason, or is self-atari)
+    // (a move is dumb if it fills in an eye for no reason)
     nextBoard.set(linearBoard);
     let moves = [];
     for (let x = 0; x < 5; ++x) {
@@ -302,10 +302,6 @@ function fastPlayoutLinear(board, blackToPlay, history) {
         continue;
       }
       getLibertiesLinear(nextBoard, nextLiberties);
-      if (nextLiberties[5 * x + y] == 1) {
-        moves.splice(i, 1);
-        continue;
-      }
       lastPassed = false;
       break;
     }
@@ -319,51 +315,6 @@ function fastPlayoutLinear(board, blackToPlay, history) {
     history.add(zobristHashLinear(linearBoard, false));
   }
   return scoreTerminalLinear(linearBoard, false);
-}
-
-/** 
- * @param {string[][]} position 
- * @param {boolean} immediate if true, ignores liveness analysis
- * */
-function scoreTerminal(position, immediate) {
-  let bl = 0, wl = 0;
-  let wc = 0, bc = 0, ec = 0;
-  for (let x = 0; x < 5; ++x) {
-    for (let y = 0; y < 5; ++y) {
-      if (position[x][y] == 'X') {
-        bc++;
-      }
-      if (position[x][y] == 'O') {
-        wc++;
-      }
-      if (position[x][y] == '.') {
-        let bn = false, wn = false;
-        for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          if (position[x + dx]?.[y + dy] == 'X') {
-            bn = true;
-          }
-          if (position[x + dx]?.[y + dy] == 'O') {
-            wn = true;
-          }
-        }
-        if (bn) {
-          if (wn) ec++;
-          else bl++;
-        } else {
-          if (wn) wl++;
-          else ec++;
-        }
-      }
-    }
-  }
-  if (immediate) {
-    return bc + bl;
-  }
-
-  if (wl == bl) return bc + bl;  // we assume it's seki or something
-  if (wl >= 2 && bl >= 2) return bc + bl;  // same
-  if (wl > bl) return 0;  // big loss
-  return wc + ec + bc + bl + wl;  // big win
 }
 
 function moveName(x, y) {
@@ -481,6 +432,7 @@ class MCGSNode {
         let nb = new Int8Array(25);
         let legal = addMoveLinear(board, nb, liberties, x, y, blackToPlay);
         if (!legal) continue;
+
         let hash = zobristHashLinear(nb, !blackToPlay);
         let weight = 1;
         if (USE_AI_TWEAKS) {
@@ -777,7 +729,7 @@ export async function main(ns) {
     // let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord =["X.X.X","XXXXX","XX.OO","OOOO.","OO..."];
+    let bord = [".....","XOO..","XOO..",".XOO.","#.XX."];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, seen);
 
