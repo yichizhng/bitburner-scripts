@@ -103,37 +103,6 @@ function deLinearizeBoard(linearBoard) {
   return board;
 }
 
-/** @param {string[][]} position */
-function getLibertiesLite(position) {
-  let liberties = position.map(x => x.map(() => -1));
-  for (let x = 0; x < 5; ++x) {
-    for (let y = 0; y < 5; ++y) {
-      if (liberties[x][y] == -1 && (position[x][y] == 'X' || position[x][y] == 'O')) {
-        let l = 0;
-        let seen = [];
-        let group = [[x, y]];
-        seen[10 * x + y] = 1;
-        for (let i = 0; i < group.length; ++i) {
-          for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            let xx = group[i][0] + dx, yy = group[i][1] + dy;
-            if (seen[10 * xx + yy]) continue;
-            seen[10 * xx + yy] = 1;
-            if (position[xx]?.[yy] == position[x][y]) {
-              group.push([xx, yy])
-            } else if (position[xx]?.[yy] == '.') {
-              l++;
-            }
-          }
-        }
-        for (let [xx, yy] of group) {
-          liberties[xx][yy] = l;
-        }
-      }
-    }
-  }
-  return liberties;
-}
-
 /** 
  * @param {Int8Array} board linearized board to analyze
  * @param {Int8Array} buffer output buffer for liberties
@@ -166,51 +135,6 @@ function getLibertiesLinear(board, liberties) {
       }
     }
   }
-}
-
-/** 
- * @param {string[][]} position 
- * @param {boolean} immediate if true, ignores liveness analysis
- * */
-function scoreTerminal(position, immediate) {
-  let bl = 0, wl = 0;
-  let wc = 0, bc = 0, ec = 0;
-  for (let x = 0; x < 5; ++x) {
-    for (let y = 0; y < 5; ++y) {
-      if (position[x][y] == 'X') {
-        bc++;
-      }
-      if (position[x][y] == 'O') {
-        wc++;
-      }
-      if (position[x][y] == '.') {
-        let bn = false, wn = false;
-        for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          if (position[x + dx]?.[y + dy] == 'X') {
-            bn = true;
-          }
-          if (position[x + dx]?.[y + dy] == 'O') {
-            wn = true;
-          }
-        }
-        if (bn) {
-          if (wn) ec++;
-          else bl++;
-        } else {
-          if (wn) wl++;
-          else ec++;
-        }
-      }
-    }
-  }
-  if (immediate) {
-    return bc + bl;
-  }
-
-  if (wl == bl) return bc + bl;  // we assume it's seki or something
-  if (wl >= 2 && bl >= 2) return bc + bl;  // same
-  if (wl > bl) return 0;  // big loss
-  return wc + ec + bc + bl + wl;  // big win
 }
 
 /** 
@@ -252,65 +176,6 @@ function scoreTerminalLinear(board, immediate) {
   if (wl >= 2 && bl >= 2) return bc + bl;  // same
   if (wl > bl) return 0;  // big loss
   return wc + ec + bc + bl + wl;  // big win
-}
-
-/** 
- * @param {string[][]} board
- * @param {number[][]} liberties
- * @param {number} x
- * @param {number} y
- * @param {boolean} blackToPlay
- */
-function addMove(board, liberties, x, y, blackToPlay) {
-  // TODO: also update the Zobrist hash and liberties here.
-  if (board[x][y] != '.') return null;
-  /** @type {[number, number][]} */
-  let toCapture = [];
-  let legal = false;
-  for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    switch (board[x + dx]?.[y + dy]) {
-      case '.':
-        legal = true;
-        break;
-      case 'X':
-        if (blackToPlay) {
-          if (liberties[x + dx][y + dy] > 1) {
-            legal = true;
-          }
-        } else {
-          if (liberties[x + dx][y + dy] == 1) {
-            legal = true;
-            toCapture.push([x + dx, y + dy]);
-          }
-        }
-        break;
-      case 'O':
-        if (blackToPlay) {
-          if (liberties[x + dx][y + dy] == 1) {
-            legal = true;
-            toCapture.push([x + dx, y + dy]);
-          }
-        } else {
-          if (liberties[x + dx][y + dy] > 1) {
-            legal = true;
-          }
-        }
-    }
-  }
-  if (!legal) return null;
-  let bc = board.map(x => [...x]);
-  bc[x][y] = blackToPlay ? 'X' : 'O';
-  for (let i = 0; i < toCapture.length; ++i) {
-    let [xx, yy] = toCapture[i];
-    bc[xx][yy] = '.';
-    for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      if (bc[xx + dx]?.[yy + dy] == (blackToPlay ? 'O' : 'X')) {
-        bc[xx + dx][yy + dy] = '.';
-        toCapture.push([xx + dx, yy + dy]);
-      }
-    }
-  }
-  return bc;
 }
 
 /** 
@@ -378,18 +243,15 @@ function addMoveLinear(board, nextBoard, liberties, x, y, blackToPlay) {
 }
 
 /**
- * @param {string[][]} board
+ * @param {Int8Array} board
  * @param {boolean} blackToPlay
  * @param {Set<number>} history
  */
 function fastPlayoutLinear(board, blackToPlay, history) {
-  // TODO: put these typed arrays in the same ArrayBuffer
   let ab = new ArrayBuffer(100);
   let linearBoard = new Int8Array(ab, 0, 25), nextBoard = new Int8Array(ab, 25, 25),
   liberties = new Int8Array(ab, 50, 25), nextLiberties = new Int8Array(ab, 75, 25);
-  linearizeBoard(board, linearBoard);
- // let linearBoard = linearizeBoard(board), nextBoard = new Int8Array(25);
- // let liberties = new Int8Array(25), nextLiberties = new Int8Array(25);
+  linearBoard.set(board);
   getLibertiesLinear(linearBoard, liberties);
   let lastPassed = false;
   for (let i = 0; i < 30; ++i) {
@@ -451,65 +313,113 @@ function fastPlayoutLinear(board, blackToPlay, history) {
       if (lastPassed) break;
       lastPassed = true;
     }
-    [nextBoard, linearBoard, nextLiberties, liberties] = [linearBoard, nextBoard, liberties, nextLiberties];
+    if (!lastPassed)
+      [nextBoard, linearBoard, nextLiberties, liberties] = [linearBoard, nextBoard, liberties, nextLiberties];
     blackToPlay = !blackToPlay;
     history.add(zobristHashLinear(linearBoard, false));
   }
   return scoreTerminalLinear(linearBoard, false);
 }
 
+/** 
+ * @param {string[][]} position 
+ * @param {boolean} immediate if true, ignores liveness analysis
+ * */
+function scoreTerminal(position, immediate) {
+  let bl = 0, wl = 0;
+  let wc = 0, bc = 0, ec = 0;
+  for (let x = 0; x < 5; ++x) {
+    for (let y = 0; y < 5; ++y) {
+      if (position[x][y] == 'X') {
+        bc++;
+      }
+      if (position[x][y] == 'O') {
+        wc++;
+      }
+      if (position[x][y] == '.') {
+        let bn = false, wn = false;
+        for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          if (position[x + dx]?.[y + dy] == 'X') {
+            bn = true;
+          }
+          if (position[x + dx]?.[y + dy] == 'O') {
+            wn = true;
+          }
+        }
+        if (bn) {
+          if (wn) ec++;
+          else bl++;
+        } else {
+          if (wn) wl++;
+          else ec++;
+        }
+      }
+    }
+  }
+  if (immediate) {
+    return bc + bl;
+  }
+
+  if (wl == bl) return bc + bl;  // we assume it's seki or something
+  if (wl >= 2 && bl >= 2) return bc + bl;  // same
+  if (wl > bl) return 0;  // big loss
+  return wc + ec + bc + bl + wl;  // big win
+}
 
 function moveName(x, y) {
   return 'ABCDE'[x] + (y + 1);
 }
 
 /**
- * @param {string[][]} board
+ * @param {Int8Array} board
  */
-function countWhiteEyes(board) {
+function countWhiteEyesLinear(board) {
   let eyeCount = 0;
-  let checked = board.map(x=>x.map(()=>false));
+  let checked = new Int8Array(25);
   for (let x = 0; x < 5; ++x) {
     for (let y = 0; y < 5; ++y) {
-      let chainID = 5*x + y + 1;
-      if (checked[x][y] || board[x][y] != 'O') continue;
-      let chain = [[x,y]];
+      let off = 5 * x + y;
+      let chainID = off + 1;
+      if (checked[off] || board[off] != 2) continue;
+      let chain = [[x, y]];
       let liberties = [];
       for (let i = 0; i < chain.length; ++i) {
-        let [xx,yy] = chain[i];
+        let [xx, yy] = chain[i];
         for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-          if (checked[xx+dx]?.[yy+dy] !== false) continue;
-          if (board[xx+dx]?.[yy+dy] == 'O') {
-            chain.push([xx+dx,yy+dy]);
-            checked[xx+dx][yy+dy] = chainID;
-          } else if (board[xx+dx]?.[yy+dy] == '.') {
-            // don't double count
-            if (checked[xx+dx][yy+dy]) continue;
-            liberties.push([xx+dx,yy+dy]);
+          if (xx + dx == -1 || xx + dx == 5 || yy + dy == -1 || yy + dy == 5) continue;
+          let offf = 5 * (xx + dx) + (yy + dy);
+          if (checked[offf] !== 0) continue;
+          if (board[offf] == 2) {
+            chain.push([xx + dx, yy + dy]);
+            checked[offf] = chainID;
+          } else if (board[offf] == 0) {
+            liberties.push([xx + dx, yy + dy]);
           }
         }
       }
-      for (let [x,y] of liberties) {
-        if (checked[x][y] !== false) continue;
-        checked[x][y] = chainID;
-        let eye = [[x,y]];
+      for (let [x, y] of liberties) {
+        if (checked[5 * x + y] !== 0) continue;
+        checked[5 * x + y] = chainID;
+        let eye = [[x, y]];
         let toCheck = [];
         let isEye = true;
         c: for (let i = 0; i < eye.length; ++i) {
-          let [xx,yy] = eye[i];
+          let [xx, yy] = eye[i];
           for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            if (board[xx+dx]?.[yy+dy] == 'X') {
+            if (xx + dx == -1 || xx + dx == 5 || yy + dy == -1 || yy + dy == 5) continue;
+            let offf = 5 * (xx + dx) + (yy + dy);
+            if (board[offf] == 1) {
               isEye = false;
             }
-            if (board[xx+dx]?.[yy+dy] == '.') {
-              if (checked[xx+dx]?.[yy+dy] !== false) continue;
-              checked[xx+dx][yy+dy] = chainID;
-              eye.push([xx+dx,yy+dy]);
+            if (board[offf] == 0) {
+              if (checked[offf] !== 0) continue;
+              checked[offf] = chainID;
+              eye.push([xx + dx, yy + dy]);
             }
-            if (board[xx+dx]?.[yy+dy] == 'O') {
-              if (checked[xx+dx][yy+dy] != chainID) {
+            if (board[offf] == 2) {
+              if (checked[offf] != chainID) {
                 // recheck them later with the chain surround logic
-                toCheck.push([xx+dx,yy+dy]);
+                toCheck.push([xx + dx, yy + dy]);
               }
             }
           }
@@ -517,26 +427,29 @@ function countWhiteEyes(board) {
         if (!isEye || eye.length > 11) continue;
         let seen = [];
         h: for (let i = 0; i < toCheck.length; ++i) {
-          let [xx,yy] = toCheck[i];
-          seen[10*xx + yy] = true;
+          let [xx, yy] = toCheck[i];
+          seen[10 * xx + yy] = true;
           for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            if (board[xx+dx]?.[yy+dy] == null || 
-                board[xx+dx]?.[yy+dy] == '#') continue;
-            if (board[xx+dx]?.[yy+dy] == 'X') {
+            if (xx + dx == -1 || xx + dx == 5 || yy + dy == -1 || yy + dy == 5) continue;
+            let offf = 5 * (xx + dx) + (yy + dy);
+            if (board[offf] == -1) continue;
+            if (board[offf] == 1) {
               isEye = false;
               break h;
             }
-            if (board[xx+dx]?.[yy+dy] == 'O' &&
-              checked[xx+dx]?.[yy+dy] == chainID) {
+            if (board[offf] == 2 &&
+              checked[offf] == chainID) {
               continue;
             }
-            if (seen[10*(xx+dx) + (yy+dy)]) continue;
-            seen[10*(xx+dx) + (yy+dy)] = true;
-            toCheck.push([xx+dx, yy+dy]);
+            if (seen[10 * (xx + dx) + (yy + dy)]) continue;
+            seen[10 * (xx + dx) + (yy + dy)] = true;
+            toCheck.push([xx + dx, yy + dy]);
           }
         }
         if (isEye) {
           eyeCount++;
+        } else {
+          for (let [x,y] of eye) checked[5*x+y] = 0;
         }
       }
     }
@@ -546,7 +459,7 @@ function countWhiteEyes(board) {
 
 class MCGSNode {
   /**
-   * @param {string[][]} board
+   * @param {Int8Array} board
    * @param {boolean} blackToPlay
    * @param {Map<number, MCGSNode>} map
    * @param {Set<number>} history hashes of previous game states, used for superko detection
@@ -554,19 +467,21 @@ class MCGSNode {
   constructor(board, blackToPlay, map, history) {
     this.board = board;
     this.blackToPlay = blackToPlay;
-    this.hash = zobristHash(board, blackToPlay);
+    this.hash = zobristHashLinear(board, blackToPlay);
 
-    let liberties = getLibertiesLite(board);
+    let liberties = new Int8Array(25);
+    getLibertiesLinear(board, liberties);
 
-    /** @type [number, number, string[][], [number,number]|null, number, MCGSNode|null][] */
+    /** @type [number, number, Int8Array, [number,number]|null, number, MCGSNode|null][] */
     this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 1, null]];
 
-    let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyes(board);
+    let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyesLinear(board);
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
-        let np = addMove(board, liberties, x, y, blackToPlay);
-        if (!np) continue;
-        let hash = zobristHash(np, !blackToPlay);
+        let nb = new Int8Array(25);
+        let legal = addMoveLinear(board, nb, liberties, x, y, blackToPlay);
+        if (!legal) continue;
+        let hash = zobristHashLinear(nb, !blackToPlay);
         let weight = 1;
         if (USE_AI_TWEAKS) {
           if (!blackToPlay) {
@@ -578,40 +493,46 @@ class MCGSNode {
             let emptycount = 0;
             let neighborliberties = 1;
             for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-              if (board[x + dx]?.[y + dy] == 'X') {
-                if (liberties[x+dx][y+dy] == 2) {
+              if (x + dx == -1 || x + dx == 5 || y + dy == -1 || y + dy == 5) {
+                white_or_offline_neighbors++;
+                continue;
+              }
+              let off = 5 * (x + dx) + (y + dy);
+              if (board[off] == 1) {
+                if (liberties[off] == 2) {
                   isatari = true;
-                } else if (liberties[x+dx][y+dy] == 1) {
+                } else if (liberties[off] == 1) {
                   iscapture = true;
                 }
               }
-              if (board[x + dx]?.[y + dy] == 'O') {
+              if (board[off] == 2) {
                 white_or_offline_neighbors++;
                 // it also won't play eye moves from a group that has
                 // two eyes, but i don't really feel like checking
                 let islone = true;
                 for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-                  if (board[x + dx + ddx]?.[y + dy + ddy] == 'O') islone = false;
+                  if (x + dx + ddx == -1 || x + dx + ddx == 5 || y + dy + ddy == -1 || y + dy + ddy == 5) continue;
+                  if (board[5 * (x + dx + ddx) + y + dy + ddy] == 2) islone = false;
                 }
                 if (!islone) isnobi = true;
-                if (liberties[x+dx][y+dy] == 1) {
+                if (liberties[off] == 1) {
                   isdefend = true;
-                } else if (liberties[x+dx]?.[y+dy] > neighborliberties) {
-                  neighborliberties = liberties[x+dx][y+dy];
+                } else if (liberties[off] > neighborliberties) {
+                  neighborliberties = liberties[off];
                 }
               }
-              if (board[x + dx]?.[y + dy] == '.') {
+              if (board[off] == 0) {
                 emptycount++;
               }
-              if (board[x + dx]?.[y + dy] == null || board[x + dx]?.[y + dy] == '#') {
+              if (board[off] == '#') {
                 white_or_offline_neighbors++;
               }
             }
             let makesEye = false;
-            if (!iscapture) {
-              let nb = board.map(x=>[...x]);
-              nb[x][y] = 'O';
-              let newWhiteEyes = countWhiteEyes(nb);
+            if (!iscapture && !isdefend && isnobi) {
+              let nb = new Int8Array(board);
+              nb[5 * x + y] = 2;
+              let newWhiteEyes = countWhiteEyesLinear(nb);
               if (newWhiteEyes > whiteEyes) makesEye = true;
             }
 
@@ -626,7 +547,7 @@ class MCGSNode {
             }
           }
         }
-        this.children.push([hash, 0, np, [x, y], weight, null]);
+        this.children.push([hash, 0, nb, [x, y], weight, null]);
       }
     }
     map.set(this.hash, this);
@@ -659,7 +580,7 @@ class MCGSNode {
  * @param {number[]} seen_hashes
  */
 function getMoves(board, seen_hashes = []) {
-  let b = board.map(x => [...x]);
+  let b = linearizeBoard(board);
 
   let map = new Map();
   let root = new MCGSNode(b, true, map, new Set([seen_hashes]));
@@ -673,7 +594,7 @@ function getMoves(board, seen_hashes = []) {
       if (root.getcPUCT() < 2) break;
     }
     let seen = new Set(seen_hashes);
-    seen.add(zobristHash(b, false));
+    seen.add(zobristHashLinear(b, false));
     let path = [root];
     let nn = 0;  // result of playout
     let lastPassed = false;
@@ -683,19 +604,19 @@ function getMoves(board, seen_hashes = []) {
       let bestCount = 0;
       let nh = ln.children[0];
       for (let c of ln.children) {
-        if (seen.has(zobristHash(c[2],false))) {
+        if (seen.has(zobristHashLinear(c[2], false))) {
           if (c[3] == null) {
             if (lastPassed) {
-            ln.DP ??= ['t', 0, null, null, 1, scoreTerminal(ln.board, true)];
-            let score = (ln.blackToPlay ? 1 : -1) * ln.DP[5];
-            // no exploration factor because we know terminal nodes have no variance
-            if (score > bestScore) {
-              bestScore = score;
-              bestCount = 1;
-              nn = ln.DP[5];
-              nh = ln.DP;
-            }
-            continue;
+              ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board, true)];
+              let score = (ln.blackToPlay ? 1 : -1) * ln.DP[5];
+              // no exploration factor because we know terminal nodes have no variance
+              if (score > bestScore) {
+                bestScore = score;
+                bestCount = 1;
+                nn = ln.DP[5];
+                nh = ln.DP;
+              }
+              continue;
             }
           } else {
             continue;
@@ -707,7 +628,7 @@ function getMoves(board, seen_hashes = []) {
           ((ln.blackToPlay ? 1 : -1) *
             (c[5]?.Q ?? ln.Q) +
             (EXPLORATION_PARAMETER *
-            (c[5]?.getcPUCT?.() ?? 25) // child node's variance
+              (c[5]?.getcPUCT?.() ?? 25) // child node's variance
               * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
           if (c[4] < 1) continue;
@@ -733,7 +654,7 @@ function getMoves(board, seen_hashes = []) {
         nn = nh[5];
         break;
       }
-      seen.add(zobristHash(nh[2], false));
+      seen.add(zobristHashLinear(nh[2], false));
       nh[5] ??= map.get(nh[0]);
       if (nh[5]) {
         path.push(nh[5]);
@@ -767,13 +688,13 @@ function getMoves(board, seen_hashes = []) {
     c[2] = c[5]?.Q ?? 0;
   }
   if (ANALYSIS_MODE) {
-  let refutation = children[0][5]?.children;
-  if (refutation) {
-    refutation.sort((x,y) => y[1] - x[1]);
-    for (let r of refutation) {
-      console.log(r[3] ? moveName(...r[3]) : 'pass', r[1], r[4]);
+    let refutation = children[0][5]?.children;
+    if (refutation) {
+      refutation.sort((x, y) => y[1] - x[1]);
+      for (let r of refutation) {
+        console.log(r[3] ? moveName(...r[3]) : 'pass', r[1], r[4]);
+      }
     }
-  }
   }
   return [root.Q, root.getcPUCT(), children];
 }
@@ -809,34 +730,25 @@ export async function main(ns) {
   }
 
   if (ANALYSIS_MODE) {
-  ns.clearLog()
-  ns.ui.setTailTitle('Analysis mode')
+    ns.clearLog()
+    ns.ui.setTailTitle('Analysis mode')
 
-  let cord = [".....",".....",".....",".....","....."];
-  let start = Date.now();
-  for (let i = 0; i < 1000; ++i) {
-    let seen = new Set();
-    let nn = fastPlayout(cord.map(x => [...x]), true, seen);
-  }
-  ns.print('Ran 1000 playouts in ', Date.now() - start, 'ms')
-  return;
+    // analyze current game state
+   // let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
+   // let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
-  // analyze current game state
-  //let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
-  //let [q,s,moves] = await getMoves(ns.go.getBoardState(), seen, false);
- 
-  // analyze board
-   let bord = ["#O..#","#.OX.","#OXO.","#OXO.","#..X."];
-   let seen = [];
-   let [q,s,moves] = await getMoves(bord, seen);
+    // analyze board
+     let bord = ["O.OO.",".OOOX",".OOX.","XOX.X",".X.X."];
+     let seen = [];
+     let [q,s,moves] = await getMoves(bord, seen);
 
-  for (let [h, n, q, m] of moves) {
-    ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
-    //if (seen.includes(h) && m) {
-    //  ns.print('illegal due to superko rule')
-    //}
-  }
-  return;
+    for (let [h, n, q, m] of moves) {
+      ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
+      //if (seen.includes(h) && m) {
+      //  ns.print('illegal due to superko rule')
+      //}
+    }
+    return;
   }
 
   let start = Date.now();
@@ -853,13 +765,13 @@ export async function main(ns) {
     let prevboard, prevq = 0;
     while (lastMove.type != 'gameOver') {
       if (lastMove.type == 'pass') {
-        let {whiteScore, komi} = ns.go.getGameState();
+        let { whiteScore, komi } = ns.go.getGameState();
         if (whiteScore == komi) {
           await ns.go.passTurn();
           break;
         }
       }
-      let seen = ns.go.getMoveHistory().map((x, i) => zobristHash(x, false));
+      let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
 
       let q, s, moves;
       try {
