@@ -200,26 +200,23 @@ function moveName(x, y) {
  */
 function countWhiteEyes(board) {
   let eyeCount = 0;
-  let wc = board.map(x=>x.map(()=>false));
   let checked = board.map(x=>x.map(()=>false));
   for (let x = 0; x < 5; ++x) {
     for (let y = 0; y < 5; ++y) {
       let chainID = 5*x + y + 1;
       if (checked[x][y] || board[x][y] != 'O') continue;
-      checked[x][y] = chainID;
       let chain = [[x,y]];
       let liberties = [];
       for (let i = 0; i < chain.length; ++i) {
         let [xx,yy] = chain[i];
         for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
           if (checked[xx+dx]?.[yy+dy] !== false) continue;
-          if (board[xx+dx]?.[yy+dy] == 'O' || board[xx+dx]?.[yy+dy] == '#') {
+          if (board[xx+dx]?.[yy+dy] == 'O') {
             chain.push([xx+dx,yy+dy]);
             checked[xx+dx][yy+dy] = chainID;
           } else if (board[xx+dx]?.[yy+dy] == '.') {
+            // don't double count
             if (checked[xx+dx][yy+dy]) continue;
-            // if it was already checked by another chain, it
-            // isn't an eye
             liberties.push([xx+dx,yy+dy]);
           }
         }
@@ -228,39 +225,53 @@ function countWhiteEyes(board) {
         if (checked[x][y] !== false) continue;
         checked[x][y] = chainID;
         let eye = [[x,y]];
-        let isEye = true, isControlled = true;
-        for (let i = 0; i < eye.length; ++i) {
+        let toCheck = [];
+        let isEye = true;
+        c: for (let i = 0; i < eye.length; ++i) {
           let [xx,yy] = eye[i];
           for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            if (checked[xx+dx]?.[yy+dy] !== false) continue;
             if (board[xx+dx]?.[yy+dy] == 'X') {
               isEye = false;
-              isControlled = false;
             }
             if (board[xx+dx]?.[yy+dy] == '.') {
+              if (checked[xx+dx]?.[yy+dy] !== false) continue;
               checked[xx+dx][yy+dy] = chainID;
               eye.push([xx+dx,yy+dy]);
             }
-            if (board[xx+dx]?.[yy+dy] == 'O' || board[xx+dx]?.[yy+dy] == '#') {
-              // the AI doesn't believe in shared eyes (okay, well, it
-              // does in one case, but that case basically doesn't come up)
+            if (board[xx+dx]?.[yy+dy] == 'O') {
               if (checked[xx+dx][yy+dy] != chainID) {
-                 isEye = false;
+                // recheck them later with the chain surround logic
+                toCheck.push([xx+dx,yy+dy]);
               }
             }
           }
         }
-        if (eye.length > 11) isEye = false;
-        if (isControlled) {
-          for (let [xx,yy] of eye) {
-            wc[xx][yy] = true;
+        if (!isEye || eye.length > 11) continue;
+        let seen = [];
+        h: for (let i = 0; i < toCheck.length; ++i) {
+          let [xx,yy] = toCheck[i];
+          seen[10*xx + yy] = true;
+          for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            if (board[xx+dy]?.[yy+dy] == null || 
+                board[xx+dy]?.[yy+dy] == '#') continue;
+            if (board[xx+dx]?.[yy+dy] == 'X') {
+              isEye = false;
+              break h;
+            }
+            if (checked[xx+dx]?.[yy+dy] == chainID) {
+              continue;
+            }
+            if (seen[10*(xx+dx) + (yy+dy)]) continue;
+            toCheck.push([xx+dx, yy+dy]);
           }
         }
-        if (isEye) eyeCount++;
+        if (isEye) {
+          eyeCount++;
+        }
       }
     }
   }
-  return [eyeCount, wc];
+  return eyeCount;
 }
 
 class MCGSNode {
@@ -280,7 +291,7 @@ class MCGSNode {
     /** @type [number, number, string[][], [number,number]|null, number, MCGSNode|null][] */
     this.children = [[this.hash ^ BITMASKS[50], 0, board, null, 1, null]];
 
-    let we = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyes(board);
+    let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyes(board);
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
         let np = addMove(board, liberties, x, y, blackToPlay);
@@ -289,10 +300,11 @@ class MCGSNode {
         let weight = 1;
         if (USE_AI_TWEAKS) {
           if (!blackToPlay) {
-            let [whiteEyes, wc] = we;
             let isatari = false;
             let iscapture = false;
             let isdefend = false;
+            let isnobi = false;
+            let white_or_offline_neighbors = 0;
             let emptycount = 0;
             let neighborliberties = 1;
             for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
@@ -304,6 +316,14 @@ class MCGSNode {
                 }
               }
               if (board[x + dx]?.[y + dy] == 'O') {
+                white_or_offline_neighbors++;
+                // it also won't play eye moves from a group that has
+                // two eyes, but i don't really feel like checking
+                let islone = true;
+                for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+                  if (board[x + dx + ddx]?.[y + dy + ddy] == 'O') islone = false;
+                }
+                if (!islone) isnobi = true;
                 if (liberties[x+dx][y+dy] == 1) {
                   isdefend = true;
                 } else if (liberties[x+dx]?.[y+dy] > neighborliberties) {
@@ -313,12 +333,15 @@ class MCGSNode {
               if (board[x + dx]?.[y + dy] == '.') {
                 emptycount++;
               }
+              if (board[x + dx]?.[y + dy] == null || board[x + dx]?.[y + dy] == '#') {
+                white_or_offline_neighbors++;
+              }
             }
             let makesEye = false;
             if (!iscapture) {
               let nb = board.map(x=>[...x]);
               nb[x][y] = 'O';
-              let [newWhiteEyes] = countWhiteEyes(nb);
+              let newWhiteEyes = countWhiteEyes(nb);
               if (newWhiteEyes > whiteEyes) makesEye = true;
             }
 
@@ -326,7 +349,7 @@ class MCGSNode {
               weight = 100;
             } else if (isdefend && neighborliberties + emptycount > 2) {
               weight = 80;
-            } else if (makesEye && !wc[x][y]) {
+            } else if (makesEye && isnobi && white_or_offline_neighbors > 1 && emptycount > 0) {
               weight = 60;
             } else if (isatari && neighborliberties + emptycount > 2) {
               weight = 40;
@@ -563,14 +586,19 @@ export async function main(ns) {
   if (ANALYSIS_MODE) {
   ns.clearLog()
   ns.ui.setTailTitle('Analysis mode')
+
+  //let cord = ["..OX#","OOOX.",".OOX#","..OX#","..XX."];
+  //ns.print(countWhiteEyes(cord.map(x=>[...x])));
+  //return;
+
   // analyze current game state
-  let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
-  let [q,s,moves] = await gm(ns.go.getBoardState(), seen, false);
-  
+  //let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
+  //let [q,s,moves] = await getMoves(ns.go.getBoardState(), seen, false);
+ 
   // analyze board
-  // let bord = [".....",".XXX.",".XOO#",".OO..","O.O.."];
-  // let seen = [];
-  // let [q,s,moves] = await getMoves(bord, seen);
+   let bord = ["#O..#","#.OX.","#OXO.","#OXO.","#..X."];
+   let seen = [];
+   let [q,s,moves] = await getMoves(bord, seen);
 
   for (let [h, n, q, m] of moves) {
     ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
