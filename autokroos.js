@@ -25,7 +25,7 @@ const USE_AI_TWEAKS = true;
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = true;
+const ANALYSIS_MODE = false;
 
 /** @param {string[][] | string[]} board
   * @param {boolean} blackToPlay */
@@ -250,7 +250,7 @@ function addMoveLinear(board, nextBoard, liberties, x, y, blackToPlay) {
 function fastPlayoutLinear(board, blackToPlay, history) {
   let ab = new ArrayBuffer(100);
   let linearBoard = new Int8Array(ab, 0, 25), nextBoard = new Int8Array(ab, 25, 25),
-  liberties = new Int8Array(ab, 50, 25), nextLiberties = new Int8Array(ab, 75, 25);
+    liberties = new Int8Array(ab, 50, 25), nextLiberties = new Int8Array(ab, 75, 25);
   linearBoard.set(board);
   getLibertiesLinear(linearBoard, liberties);
   let lastPassed = false;
@@ -449,7 +449,7 @@ function countWhiteEyesLinear(board) {
         if (isEye) {
           eyeCount++;
         } else {
-          for (let [x,y] of eye) checked[5*x+y] = 0;
+          for (let [x, y] of eye) checked[5 * x + y] = 0;
         }
       }
     }
@@ -505,22 +505,32 @@ class MCGSNode {
                   if (!bigatari) {
                     // Check whether this group is large
                     let seen = [];
-                    seen[x+dx, y+dy] = true;
-                    let group = [[x+dx, y+dy]];
+                    let group = [[x + dx, y + dy]];
+                    let groupliberties = [];
                     for (let i = 0; i < group.length; ++i) {
                       let [x, y] = group[i];
                       for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
                         if (x + dx == -1 || x + dx == 5 || y + dy == -1 || y + dy == 5) continue;
-                        let off = 5*(x+dx) + (y+dy);
+                        let off = 5 * (x + dx) + (y + dy);
                         if (board[off] == 1) {
                           if (seen[off]) continue;
                           seen[off] = 1;
-                          group.push([x,y]);
-                          if (group.length >= 3) break;
+                          group.push([x+dx,y+dy]);
+                        }
+                        if (board[off] == 0) {
+                          if (seen[off]) continue;
+                          seen[off] = 1;
+                          groupliberties.push([x+dx,y+dy]);
                         }
                       }
                     }
-                    if (group.length >= 3) bigatari = true;
+                    if (group.length >= 3) {
+                      if (Math.abs(groupliberties[0][0] - groupliberties[1][0]) +
+                          Math.abs(groupliberties[0][1] - groupliberties[1][1]) == 1) {
+                        // big atari only applies if there is one liberty group
+                        bigatari = true;
+                      }
+                    }
                   }
                 } else if (liberties[off] == 1) {
                   iscapture = true;
@@ -564,8 +574,14 @@ class MCGSNode {
             } else if (makesEye && isnobi && white_or_offline_neighbors > 1 && emptycount > 0) {
               weight = 60;
             } else if (isatari) {
-              if (bigatari || neighborliberties + emptycount > 2) {
+              if (bigatari) {
                 weight = 40;
+              } else {
+                let nb = new Int8Array(board);
+                nb[5 * x + y] = 2;
+                let nl = new Int8Array(25);
+                getLibertiesLinear(nb, nl);
+                if (nl[5 * x + y] > 1) weight = 40;
               }
             }
           }
@@ -756,15 +772,14 @@ export async function main(ns) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
-
     // analyze current game state
-   // let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
-   // let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
+    // let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
+    // let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-     let bord = ["#OO..","OOO.X","XOOOX","XXX.#","#..##"];
-     let seen = [];
-     let [q,s,moves] = await getMoves(bord, seen);
+    let bord =["X.X.X","XXXXX","XX.OO","OOOO.","OO..."];
+    let seen = [];
+    let [q, s, moves] = await getMoves(bord, seen);
 
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
