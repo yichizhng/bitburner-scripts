@@ -25,7 +25,7 @@ const USE_AI_TWEAKS = true;
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = false;
+const ANALYSIS_MODE = true;
 
 /** @param {string[][] | string[]} board
   * @param {boolean} blackToPlay */
@@ -34,9 +34,9 @@ function zobristHash(board, blackToPlay) {
   for (var i = 0; i < 5; ++i) {
     for (var j = 0; j < 5; ++j) {
       if (board[i][j] == 'O')
-        x ^= BITMASKS[2 * (5 * j + i)];
+        x ^= BITMASKS[2 * (5 * i + j)];
       if (board[i][j] == 'X')
-        x ^= BITMASKS[2 * (5 * j + i) + 1];
+        x ^= BITMASKS[2 * (5 * i + j) + 1];
     }
   }
   if (blackToPlay) {
@@ -140,13 +140,14 @@ function getLibertiesLite(position) {
  * @param {boolean} blackToPlay
  * @param {Set<number>} history
  */
-function fastPlayout(position, blackToPlay, history, ns) {
+function fastPlayout(position, blackToPlay, history) {
   let lastPassed = false;
+  let liberties = getLibertiesLite(position);
   for (let i = 0; i < 30; ++i) {
     // pick a non-dumb move at random, defaulting to pass
     // (a move is dumb if it is self-atari or fills in an eye for no reason)
-    let np = position.map(x => [...x]);
-    let liberties = getLibertiesLite(position);
+    let np = position;
+    let nextLiberties = liberties;
     let moves = [];
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
@@ -170,21 +171,41 @@ function fastPlayout(position, blackToPlay, history, ns) {
           }
         }
         if (fillsEye) continue;
-        let nc = addMove(position, liberties, x, y, blackToPlay);
-        if (!nc) continue;
-        let hash = zobristHash(nc, false);
-        if (history.has(hash)) continue;
-        moves.push(nc);
+        moves.push([x,y]);
       }
     }
-    if (moves.length) {
+    while (moves.length) {
+      let i = Math.floor(Math.random() * moves.length);
+      let [x,y] = moves[i];
+      let nc = addMove(position, liberties, x, y, blackToPlay);
+      if (!nc) {
+        moves.splice(i,1);
+        continue;
+      }
+      let hash = zobristHash(nc, false);
+      if (history.has(hash)) {
+        moves.splice(i,1);
+        continue;
+      }
+      let nl = getLibertiesLite(nc);
+      if (nl[x][y] == 1) {
+        moves.splice(i,1);
+        continue;
+      }
+
       lastPassed = false;
-      np = moves[Math.floor(Math.random() * moves.length)]
-    } else {
+      np = nc;
+      nextLiberties = nl;
+      break;
+    }
+    if (!moves.length) {
       if (lastPassed) break;
+      np = position;
+      nextLiberties = liberties;
       lastPassed = true;
     }
     position = np;
+    liberties = nextLiberties;
     blackToPlay = !blackToPlay;
     history.add(zobristHash(position, false));
   }
@@ -215,8 +236,6 @@ function countWhiteEyes(board) {
             chain.push([xx+dx,yy+dy]);
             checked[xx+dx][yy+dy] = chainID;
           } else if (board[xx+dx]?.[yy+dy] == '.') {
-            // don't double count
-            if (checked[xx+dx][yy+dy]) continue;
             liberties.push([xx+dx,yy+dy]);
           }
         }
@@ -252,21 +271,26 @@ function countWhiteEyes(board) {
           let [xx,yy] = toCheck[i];
           seen[10*xx + yy] = true;
           for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            if (board[xx+dy]?.[yy+dy] == null || 
-                board[xx+dy]?.[yy+dy] == '#') continue;
+            if (board[xx+dx]?.[yy+dy] == null || 
+                board[xx+dx]?.[yy+dy] == '#') continue;
             if (board[xx+dx]?.[yy+dy] == 'X') {
               isEye = false;
               break h;
             }
-            if (checked[xx+dx]?.[yy+dy] == chainID) {
+            if (board[xx+dx]?.[yy+dy] == 'O' &&
+              checked[xx+dx]?.[yy+dy] == chainID) {
               continue;
             }
             if (seen[10*(xx+dx) + (yy+dy)]) continue;
+            seen[10*(xx+dx) + (yy+dy)] = true;
             toCheck.push([xx+dx, yy+dy]);
           }
         }
         if (isEye) {
           eyeCount++;
+        } else {
+          // reset checked status so enclosing chains can check
+          for (let [x,y] of eye) checked[x][y] = false;
         }
       }
     }
@@ -396,7 +420,7 @@ function getMoves(board, seen_hashes = []) {
   for (let i = 0; i < PLAYOUTS; ++i) {
     if (i % 2000 == 1999) {
       let c = root.children.reduce((x, y) => y[1] > x[1] ? y : x);
-      if (c[1] >= 0.5 * PLAYOUTS) {
+      if (c[1] >= 0.5 * PLAYOUTS || c[1] > 0.9 * i) {
         break;
       }
       if (root.Q > 20 || root.Q < 4) break;
@@ -582,21 +606,19 @@ export async function main(ns) {
       worker.postMessage([d, m]);
     });
   }
-
+  
   if (ANALYSIS_MODE) {
   ns.clearLog()
   ns.ui.setTailTitle('Analysis mode')
 
-  //let cord = ["..OX#","OOOX.",".OOX#","..OX#","..XX."];
-  //ns.print(countWhiteEyes(cord.map(x=>[...x])));
-  //return;
-
   // analyze current game state
   //let seen = ns.go.getMoveHistory().map(x=>zobristHash(x,false));
   //let [q,s,moves] = await getMoves(ns.go.getBoardState(), seen, false);
- 
+   //let cord = ["O.OO.",".OOOX","OOOX.","XOX.X",".X.X."];
+ //ns.print(countWhiteEyes(cord.map(x=>[...x])))
+ //return;
   // analyze board
-   let bord = ["#O..#","#.OX.","#OXO.","#OXO.","#..X."];
+   let bord = ["O.OO.",".OOOX",".OOX.","XOX.X",".X.X."];
    let seen = [];
    let [q,s,moves] = await getMoves(bord, seen);
 
