@@ -549,9 +549,6 @@ class MCGSNode {
     // Playouts going though this node
     this.N = 1;
 
-    // Expected utility of playouts going through this node
-    this.Q = this.U;
-
     // Total utility of playouts going through this node
     this.S = this.U;
 
@@ -581,7 +578,7 @@ function getMoves(board, seen_hashes = []) {
       if (c[1] >= 0.5 * PLAYOUTS) {
         break;
       }
-      if (root.Q > 20 || root.Q < 4) break;
+      if (root.S / root.N > 20 || root.S / root.N < 4) break;
       if (root.getcPUCT() < 2) break;
     }
     let seen = new Set(seen_hashes);
@@ -615,9 +612,10 @@ function getMoves(board, seen_hashes = []) {
         }
         // eagerly update cached child pointer
         c[5] ??= map.get(c[0]);
+        let q = c[5] ? c[5].S / c[5].N : ln.S / ln.N;
         let score =
           ((ln.blackToPlay ? 1 : -1) *
-            (c[5]?.Q ?? ln.Q) +
+            q +
             (EXPLORATION_PARAMETER *
               (c[5]?.getcPUCT?.() ?? 25) // child node's variance
               * Math.sqrt(ln.N) / (1 + c[1])));
@@ -658,16 +656,19 @@ function getMoves(board, seen_hashes = []) {
     // See https://github.com/lightvector/KataGo/blob/master/docs/GraphSearch.md
     for (let i = path.length; i-- > 0;) {
       let node = path[i];
-      let s = 0;
+      let s = 0, ss = 0;
       for (let c of node.children) {
-        s += c[1] * (map.get(c[0])?.Q ?? 0);
+        let cn = map.get(c[0]);
+        if (!cn) continue;
+        s += c[1] * cn.S / cn.N;
+        ss += c[1] * cn.SS / cn.N;
       }
       if (node.DP) {
         s += node.DP[1] * node.DP[5];
+        ss += node.DP[1] * node.DP[5] * node.DP[5];
       }
-      node.Q = (node.U + s) / node.N;
-      node.S += nn;
-      node.SS += nn ** 2;
+      node.S = (node.U + s);
+      node.SS = (node.U * node.U + ss);
     }
   }
   if (root.DP) {
@@ -676,7 +677,7 @@ function getMoves(board, seen_hashes = []) {
   }
   let children = root.children.toSorted((x, y) => y[1] - x[1]);
   for (let c of children) {
-    c[2] = c[5]?.Q ?? 0;
+    c[2] = c[5] ? c[5].S / c[5].N : 0;
   }
   if (ANALYSIS_MODE) {
     let refutation = children[0][5]?.children;
@@ -687,7 +688,7 @@ function getMoves(board, seen_hashes = []) {
       }
     }
   }
-  return [root.Q, root.getcPUCT(), children];
+  return [root.S / root.N, root.getcPUCT(), children];
 }
 
 /** @param {NS} ns */
@@ -725,13 +726,13 @@ export async function main(ns) {
     ns.ui.setTailTitle('Analysis mode')
 
     // analyze current game state
-    // let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
-    // let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
+     let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
+     let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord = [".....","XOO..","XOO..",".XOO.","#.XX."];
-    let seen = [];
-    let [q, s, moves] = await getMoves(bord, seen);
+    //let bord = [".....","XOO..","XOO..",".XOO.","#.XX."];
+    //let seen = [];
+    //let [q, s, moves] = await getMoves(bord, seen);
 
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
