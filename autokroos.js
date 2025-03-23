@@ -55,14 +55,14 @@ const EXPLORATION_PARAMETER = 0.3;
 
 // If true, white's play in the MCGS is modified to
 // account for some AI biases
-const USE_AI_TWEAKS = true;
+const USE_AI_TWEAKS = false;
 
 // If true, resets boards where AI starts with [2,2]
 // and always plays [2,2] as the first move
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = false;
+const ANALYSIS_MODE = true;
 
 // If true, does not do playouts when the child node has
 // more playouts than the edge visit count (due to
@@ -403,6 +403,7 @@ function countWhiteEyesLinear(board) {
       let chainID = off + 1;
       if (checked[off] || board[off] != 2) continue;
       let chain = [[x, y]];
+      checked[5*x + y] = chainID;
       let liberties = [];
       for (let i = 0; i < chain.length; ++i) {
         let [xx, yy] = chain[i];
@@ -569,7 +570,8 @@ class MCGSNode {
                 for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
                   if (x + dx + ddx == -1 || x + dx + ddx == BOARD_SIZE ||
                       y + dy + ddy == -1 || y + dy + ddy == BOARD_SIZE) continue;
-                  if (board[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] == 2) islone = false;
+                  if (board[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] == 2
+                  && liberties[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] <= 5) islone = false;
                 }
                 if (!islone) isnobi = true;
                 if (liberties[off] == 1) {
@@ -792,25 +794,21 @@ export async function main(ns) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
-    /*
-        let startTime = Date.now();
-        let cord = linearizeBoard(['.....','.....','.....','.....','.....']);
-        let sum = 0;
-        for (let i = 0; i < 10000; ++i) {
-          sum += fastPlayoutLinear(cord, true, new Set());
-        }
-        ns.print(sum);
-        ns.print('finished in ', Date.now()-startTime, ' ms');
-        return;
-    */
     // analyze current game state
-    let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
-    let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
+    //let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
+    //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    //let bord = ["..O.O","XXOOO",".XOXO",".XOXO","..XXO"];
-    //let seen = [];
-    //let [q, s, moves] = await getMoves(bord, seen);
+    let bord = linearizeBoard([
+      ".....",
+      "#.OX.",
+      "#.O.#",
+      ".X.O.",
+      "#...#"]);
+    ns.print(countWhiteEyesLinear(bord));
+    return;
+    let seen = [];
+    let [q, s, moves] = await getMoves(bord, seen);
 
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
