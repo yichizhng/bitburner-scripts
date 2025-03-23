@@ -55,7 +55,7 @@ const EXPLORATION_PARAMETER = 0.3;
 
 // If true, white's play in the MCGS is modified to
 // account for some AI biases
-const USE_AI_TWEAKS = false;
+const USE_AI_TWEAKS = true;
 
 // If true, resets boards where AI starts with [2,2]
 // and always plays [2,2] as the first move
