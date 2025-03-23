@@ -27,6 +27,11 @@ const RESET_FOR_TENGEN = false;
 // Switch for debugging
 const ANALYSIS_MODE = false;
 
+// If true, does not do playouts when the child node has
+// more playouts than the edge visit count (due to
+// transpositions)
+const SUPPRESS_TRANSPOSITION = true;
+
 /** @param {string[][] | string[]} board
   * @param {boolean} blackToPlay */
 function zobristHash(board, blackToPlay) {
@@ -48,6 +53,9 @@ function zobristHash(board, blackToPlay) {
 /** @param {Int8Array} board
   * @param {boolean} blackToPlay */
 function zobristHashLinear(board, blackToPlay) {
+  // Mild TODO: The Zobrist hash should actually consider
+  // whether the last move was pass, because we don't
+  // want to conflate those game states.
   var x = 0;
   for (var i = 0; i < 5; ++i) {
     for (var j = 0; j < 5; ++j) {
@@ -109,12 +117,13 @@ function deLinearizeBoard(linearBoard) {
  */
 function getLibertiesLinear(board, liberties) {
   liberties.fill(-1);
+  let seen = new Int8Array(25);
   for (let x = 0; x < 5; ++x) {
     for (let y = 0; y < 5; ++y) {
       if (liberties[5 * x + y] == -1 && (board[5 * x + y] > 0)) {
         let l = 0;
-        let seen = new Int8Array(25);
         let group = [[x, y]];
+        seen.fill(0);
         seen[5 * x + y] = 1;
         for (let i = 0; i < group.length; ++i) {
           for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
@@ -257,10 +266,10 @@ function fastPlayoutLinear(board, blackToPlay, history) {
   for (let i = 0; i < 30; ++i) {
     // pick a non-dumb move at random, defaulting to pass
     // (a move is dumb if it fills in an eye for no reason)
-    nextBoard.set(linearBoard);
     let moves = [];
     for (let x = 0; x < 5; ++x) {
       for (let y = 0; y < 5; ++y) {
+        if (board[5 * x + y] != 0) continue;
         let fillsEye = true;
         for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
           if (x + dx == -1 || x + dx == 5 || y + dy == -1 || y + dy == 5) continue;
@@ -306,6 +315,7 @@ function fastPlayoutLinear(board, blackToPlay, history) {
       break;
     }
     if (!moves.length) {
+      nextBoard.set(linearBoard);
       if (lastPassed) break;
       lastPassed = true;
     }
@@ -467,18 +477,18 @@ class MCGSNode {
                         if (board[off] == 1) {
                           if (seen[off]) continue;
                           seen[off] = 1;
-                          group.push([x+dx,y+dy]);
+                          group.push([x + dx, y + dy]);
                         }
                         if (board[off] == 0) {
                           if (seen[off]) continue;
                           seen[off] = 1;
-                          groupliberties.push([x+dx,y+dy]);
+                          groupliberties.push([x + dx, y + dy]);
                         }
                       }
                     }
                     if (group.length >= 3) {
                       if (Math.abs(groupliberties[0][0] - groupliberties[1][0]) +
-                          Math.abs(groupliberties[0][1] - groupliberties[1][1]) == 1) {
+                        Math.abs(groupliberties[0][1] - groupliberties[1][1]) == 1) {
                         // big atari only applies if there is one liberty group
                         bigatari = true;
                       }
@@ -584,54 +594,45 @@ function getMoves(board, seen_hashes = []) {
     let seen = new Set(seen_hashes);
     seen.add(zobristHashLinear(b, false));
     let path = [root];
-    let nn = 0;  // result of playout
     let lastPassed = false;
     while (true) {
       let ln = path.at(-1);
       let bestScore = -Infinity;
-      let bestCount = 0;
       let nh = ln.children[0];
+      let maxweight = ln.children.map(x => x[4]).reduce((a, b) => a > b ? a : b);
+
+      if (lastPassed) {
+        ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board, true)];
+        let score = (ln.blackToPlay ? 1 : -1) * ln.DP[5];
+        // no exploration factor because we know terminal nodes have no variance
+        if (score > bestScore) {
+          bestScore = score;
+          nn = ln.DP[5];
+          nh = ln.DP;
+        }
+      }
+      
       for (let c of ln.children) {
-        if (seen.has(zobristHashLinear(c[2], false))) {
-          if (c[3] == null) {
-            if (lastPassed) {
-              ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board, true)];
-              let score = (ln.blackToPlay ? 1 : -1) * ln.DP[5];
-              // no exploration factor because we know terminal nodes have no variance
-              if (score > bestScore) {
-                bestScore = score;
-                bestCount = 1;
-                nn = ln.DP[5];
-                nh = ln.DP;
-              }
-              continue;
-            }
-          } else {
-            continue;
-          }
+        if (seen.has(zobristHashLinear(c[2], false)) && c[3]) {
+          continue;
         }
         // eagerly update cached child pointer
         c[5] ??= map.get(c[0]);
+        let stddev = c[5]?.getcPUCT?.() ?? 25;
         let q = c[5] ? c[5].S / c[5].N : ln.S / ln.N;
         let score =
           ((ln.blackToPlay ? 1 : -1) *
             q +
             (EXPLORATION_PARAMETER *
-              (c[5]?.getcPUCT?.() ?? 25) // child node's variance
+              stddev
               * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
-          if (c[4] < 1) continue;
-          score += c[4];
+          if (c[4] < maxweight) continue;
         }
         if (score > bestScore) {
           bestScore = score;
           bestCount = 1;
           nh = c;
-        } else if (score == bestScore) {
-          bestCount++;
-          if (Math.random() * bestCount < 1) {
-            nh = c;
-          }
         }
       }
 
@@ -646,6 +647,9 @@ function getMoves(board, seen_hashes = []) {
       seen.add(zobristHashLinear(nh[2], false));
       nh[5] ??= map.get(nh[0]);
       if (nh[5]) {
+        if (SUPPRESS_TRANSPOSITION) {
+          if (nh[1] <= nh[5].N) break;
+        }
         path.push(nh[5]);
       } else {
         nh[5] = new MCGSNode(nh[2], !ln.blackToPlay, map, seen);
@@ -658,7 +662,7 @@ function getMoves(board, seen_hashes = []) {
       let node = path[i];
       let s = 0, ss = 0;
       for (let c of node.children) {
-        let cn = map.get(c[0]);
+        let cn = c[5] ??= map.get(c[0]);
         if (!cn) continue;
         s += c[1] * cn.S / cn.N;
         ss += c[1] * cn.SS / cn.N;
@@ -720,17 +724,27 @@ export async function main(ns) {
       worker.postMessage([d, m]);
     });
   }
-
   if (ANALYSIS_MODE) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
+    /*
+        let startTime = Date.now();
+        let cord = linearizeBoard(['.....','.....','.....','.....','.....']);
+        let sum = 0;
+        for (let i = 0; i < 10000; ++i) {
+          sum += fastPlayoutLinear(cord, true, new Set());
+        }
+        ns.print(sum);
+        ns.print('finished in ', Date.now()-startTime, ' ms');
+        return;
+    */
     // analyze current game state
-     let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
-     let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
+    let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
+    let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    //let bord = [".....","XOO..","XOO..",".XOO.","#.XX."];
+    //let bord = ["..O.O","XXOOO",".XOXO",".XOXO","..XXO"];
     //let seen = [];
     //let [q, s, moves] = await getMoves(bord, seen);
 
@@ -745,7 +759,7 @@ export async function main(ns) {
 
   let start = Date.now();
   let wins = 0;
-  for (let i = 0; i < 1000; ++i) {
+  for (let i = 0; i < 100; ++i) {
     let lastMove = {};
     ns.go.resetBoardState('Illuminati', 5);
     if (RESET_FOR_TENGEN) {
