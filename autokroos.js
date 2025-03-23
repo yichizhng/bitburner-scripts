@@ -62,7 +62,7 @@ const USE_AI_TWEAKS = false;
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = true;
+const ANALYSIS_MODE = false;
 
 // If true, does not do playouts when the child node has
 // more playouts than the edge visit count (due to
