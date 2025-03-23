@@ -1,8 +1,8 @@
 const BITMASKS =
   [1121947061, -235620891, -1245654258, 1684021568, 318433024, 474387246, 1950062581, -1038157227,
-   -1353011405, -1931192636, 702711060, 164763225, -1783585172, -1285514913, 13199692, -1396957377,
+    -1353011405, -1931192636, 702711060, 164763225, -1783585172, -1285514913, 13199692, -1396957377,
     1746731144, 597425358, -1732514649, -1038566413, 1251584800, 1997893375, -342518611, -1915490013,
-    731662747,-356166246, 1533270580, 2047043223, -866263845, -39925864, 2047861143, 1103388812,
+    731662747, -356166246, 1533270580, 2047043223, -866263845, -39925864, 2047861143, 1103388812,
     -1429044189, -1726474267, 1769725877, 1425886793, 1496551369, -1632216025, 388590241, -804944460,
     -70732422, 758952205, -1783521913, -579774516, 838934517, 2140282913, 958249961, -1593926963,
     -2036987585, -331123051, -678051717, 1100229620, 42729513, -406964662, 895248032, 1701086831,
@@ -292,6 +292,73 @@ function addMoveLinear(board, nextBoard, liberties, x, y, blackToPlay) {
   return true;
 }
 
+function getTerritory(board) {
+  let checked = new Int8Array(BOARD_SIZE * BOARD_SIZE);
+  let controlled = new Int8Array(board);
+  for (let x = 0; x < BOARD_SIZE; ++x) {
+    for (let y = 0; y < BOARD_SIZE; ++y) {
+      let off = BOARD_SIZE * x + y;
+      let chainID = off + 1;
+      if (checked[off] || board[off] < 1) continue;
+      let chain = [[x, y]];
+      let chainColor = board[off];
+      checked[off] = chainID;
+      let liberties = [];
+      for (let i = 0; i < chain.length; ++i) {
+        let [xx, yy] = chain[i];
+        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+          if (xx + dx == -1 || xx + dx == BOARD_SIZE || yy + dy == -1 || yy + dy == BOARD_SIZE) continue;
+          let offf = BOARD_SIZE * (xx + dx) + (yy + dy);
+          if (board[offf] == chainColor) {
+            if (checked[offf] !== 0) continue;
+            chain.push([xx + dx, yy + dy]);
+            checked[offf] = chainID;
+          } else if (board[offf] == 0) {
+            liberties.push([xx + dx, yy + dy]);
+          }
+        }
+      }
+      let hasInternalLiberty = false;
+      for (let [x, y] of liberties) {
+        if (checked[BOARD_SIZE * x + y] !== 0) {
+          if (controlled[BOARD_SIZE * x + y] == chainColor) hasInternalLiberty = true;
+          continue;
+        }
+        let libertyID = BOARD_SIZE * x + y + 1;
+        checked[BOARD_SIZE * x + y] = libertyID;
+        let eye = [[x, y]];
+        let isControlled = true;
+        for (let i = 0; i < eye.length; ++i) {
+          let [xx, yy] = eye[i];
+          for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+            if (xx + dx == -1 || xx + dx == BOARD_SIZE || yy + dy == -1 || yy + dy == BOARD_SIZE) continue;
+            let offf = BOARD_SIZE * (xx + dx) + (yy + dy);
+            if (board[offf] == 3 - chainColor) {
+              isControlled = false;
+            }
+            if (board[offf] == 0) {
+              if (checked[offf] !== 0) continue;
+              checked[offf] = libertyID;
+              eye.push([xx + dx, yy + dy]);
+            }
+          }
+        }
+        if (!isControlled || eye.length > 11) continue;
+        for (let [xx, yy] of eye) {
+          controlled[BOARD_SIZE * xx + yy] = chainColor;
+        }
+        hasInternalLiberty = true;
+      }
+      if (!hasInternalLiberty) {
+        for (let [xx, yy] of chain) {
+          controlled[BOARD_SIZE * xx + yy] = 0;
+        }
+      }
+    }
+  }
+  return controlled;
+}
+
 /**
  * @param {Int8Array} board
  * @param {boolean} blackToPlay
@@ -300,9 +367,9 @@ function addMoveLinear(board, nextBoard, liberties, x, y, blackToPlay) {
 function fastPlayoutLinear(board, blackToPlay, history) {
   let ab = new ArrayBuffer(4 * BOARD_SIZE * BOARD_SIZE);
   let linearBoard = new Int8Array(ab, 0, BOARD_SIZE * BOARD_SIZE),
-      nextBoard = new Int8Array(ab, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE),
-      liberties = new Int8Array(ab, 2 * BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE),
-      nextLiberties = new Int8Array(ab, 3 * BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
+    nextBoard = new Int8Array(ab, BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE),
+    liberties = new Int8Array(ab, 2 * BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE),
+    nextLiberties = new Int8Array(ab, 3 * BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE);
   linearBoard.set(board);
   getLibertiesLinear(linearBoard, liberties);
   let lastPassed = false;
@@ -395,7 +462,17 @@ function fastPlayoutLinear(board, blackToPlay, history) {
     blackToPlay = !blackToPlay;
     history.add(zobristHashLinear(linearBoard, false));
   }
-  return scoreTerminalLinear(linearBoard, false);
+  let territory = getTerritory(linearBoard);
+  let bs = 0, ws = 0, es = 0;
+  for (let x of territory) {
+    if (x == 0) es++;
+    if (x == 1) bs++;
+    if (x == 2) ws++;
+  }
+  if (ws == 0) return es + bs;
+  if (bs == 0) return 0;
+  return bs + es / 2;
+  //return scoreTerminalLinear(linearBoard, false);
 }
 
 function moveName(x, y) {
@@ -414,7 +491,7 @@ function countWhiteEyesLinear(board) {
       let chainID = off + 1;
       if (checked[off] || board[off] != 2) continue;
       let chain = [[x, y]];
-      checked[5*x + y] = chainID;
+      checked[5 * x + y] = chainID;
       let liberties = [];
       for (let i = 0; i < chain.length; ++i) {
         let [xx, yy] = chain[i];
@@ -509,6 +586,7 @@ class MCGSNode {
     this.children = [[this.hash ^ BITMASKS[2 * BOARD_SIZE * BOARD_SIZE], 0, board, null, 1, null]];
 
     let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyesLinear(board);
+    let territory = (USE_AI_TWEAKS && !blackToPlay) && getTerritory(board);
     for (let x = 0; x < BOARD_SIZE; ++x) {
       for (let y = 0; y < BOARD_SIZE; ++y) {
         let nb = new Int8Array(BOARD_SIZE * BOARD_SIZE);
@@ -580,9 +658,9 @@ class MCGSNode {
                 let islone = true;
                 for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
                   if (x + dx + ddx == -1 || x + dx + ddx == BOARD_SIZE ||
-                      y + dy + ddy == -1 || y + dy + ddy == BOARD_SIZE) continue;
+                    y + dy + ddy == -1 || y + dy + ddy == BOARD_SIZE) continue;
                   if (board[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] == 2
-                  && liberties[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] <= 5) islone = false;
+                    && liberties[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] <= 5) islone = false;
                 }
                 if (!islone) isnobi = true;
                 if (liberties[off] == 1) {
@@ -622,6 +700,8 @@ class MCGSNode {
                 getLibertiesLinear(nb, nl);
                 if (nl[BOARD_SIZE * x + y] > 1) weight = 400;
               }
+            } else if (territory[BOARD_SIZE * x + y] == 1) {
+              weight = 0;
             }
           }
         }
@@ -645,8 +725,8 @@ class MCGSNode {
 
   getcPUCT() {
     return ((BOARD_SIZE * BOARD_SIZE / 2) +
-      this.N * Math.max(0.1, 
-      Math.sqrt((this.SS) / (this.N) - ((this.S) / (this.N)) ** 2))) / (this.N + 1);
+      this.N * Math.max(0.1,
+        Math.sqrt((this.SS) / (this.N) - ((this.S) / (this.N)) ** 2))) / (this.N + 1);
   }
 }
 
@@ -810,7 +890,7 @@ export async function main(ns) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
-    let cord = linearizeBoard([".#OO#","X.XO.",".XXOO","X.XO.",".XOOO"]);
+    let cord = linearizeBoard([".O.O.", "..OX.", "..OX#", "O.XXO", ".O.O."]);
     let sum = 0;
     for (let i = 0; i < 1000; ++i) {
       sum += fastPlayoutLinear(cord, true, new Set());
@@ -823,7 +903,7 @@ export async function main(ns) {
     //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord = [".#OO#","X.XO.",".XXOO","X.XO.",".XOOO"];
+    let bord = [".O.O.", "..OX.", "..OX#", "O.XXO", ".O.O."];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, seen);
     ns.print('Q: ', q, ' S: ', s);
