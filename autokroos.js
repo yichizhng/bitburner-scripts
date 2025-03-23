@@ -190,6 +190,8 @@ function getLibertiesLinear(board, liberties) {
  * @param {boolean} immediate if true, ignores liveness analysis
  * */
 function scoreTerminalLinear(board, immediate) {
+  // TODO: redo non-immediate mode (by analyzing chain
+  // liveness, probably)
   let bl = 0, wl = 0;
   let wc = 0, bc = 0, ec = 0;
   for (let x = 0; x < BOARD_SIZE; ++x) {
@@ -221,7 +223,7 @@ function scoreTerminalLinear(board, immediate) {
   }
 
   if (wl == bl) return bc + bl;  // we assume it's seki or something
-  if (wl >= 3 && bl >= 3) return bc + bl;  // same
+  if (wl >= 2 && bl >= 2) return bc + bl;  // same
   if (wl > bl) return 0;  // big loss
   return wc + ec + bc + bl + wl;  // big win
 }
@@ -381,6 +383,15 @@ function fastPlayoutLinear(board, blackToPlay, history) {
     }
     if (!lastPassed)
       [nextBoard, linearBoard, nextLiberties, liberties] = [linearBoard, nextBoard, liberties, nextLiberties];
+    if (blackToPlay) {
+      if (!linearBoard.includes(2) && i >= 2) {
+        break;
+      }
+    } else {
+      if (!linearBoard.includes(1) && i >= 2) {
+        break;
+      }
+    }
     blackToPlay = !blackToPlay;
     history.add(zobristHashLinear(linearBoard, false));
   }
@@ -588,7 +599,7 @@ class MCGSNode {
               }
             }
             let makesEye = false;
-            if (!iscapture && !isdefend && isnobi) {
+            if (!iscapture && !isdefend && isnobi && whiteEyes < 2) {
               let nb = new Int8Array(board);
               nb[BOARD_SIZE * x + y] = 2;
               let newWhiteEyes = countWhiteEyesLinear(nb);
@@ -665,7 +676,7 @@ function getMoves(board, seen_hashes = []) {
       let ln = path.at(-1);
       let bestScore = -Infinity;
       let nh = ln.children[0];
-      let maxweight = ln.children.map(x => x[4]).reduce((a, b) => a > b ? a : b);
+      let maxweight = 1;
 
       if (lastPassed) {
         ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board, true)];
@@ -693,7 +704,11 @@ function getMoves(board, seen_hashes = []) {
               stddev
               * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
+          if (c[4] > maxweight) {
+            maxweight = c[4];
+          }
           if (c[4] < maxweight) continue;
+          score += 10 * maxweight;
         }
         if (score > bestScore) {
           bestScore = score;
@@ -755,6 +770,7 @@ function getMoves(board, seen_hashes = []) {
       refutation.sort((x, y) => y[1] - x[1]);
       for (let r of refutation) {
         console.log(r[3] ? moveName(...r[3]) : 'pass', r[1], r[4]);
+        console.log(r[5]?.S / r[5]?.N)
       }
     }
   }
@@ -794,22 +810,23 @@ export async function main(ns) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
+    let cord = linearizeBoard([".#OO#","X.XO.",".XXOO","X.XO.",".XOOO"]);
+    let sum = 0;
+    for (let i = 0; i < 1000; ++i) {
+      sum += fastPlayoutLinear(cord, true, new Set());
+    }
+    ns.print('average playout value: ', sum / 1000);
+    return;
+
     // analyze current game state
     //let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
     //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord = linearizeBoard([
-      ".....",
-      "#.OX.",
-      "#.O.#",
-      ".X.O.",
-      "#...#"]);
-    ns.print(countWhiteEyesLinear(bord));
-    return;
+    let bord = [".#OO#","X.XO.",".XXOO","X.XO.",".XOOO"];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, seen);
-
+    ns.print('Q: ', q, ' S: ', s);
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
       //if (seen.includes(h) && m) {
