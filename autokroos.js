@@ -11,7 +11,7 @@ const BITMASKS =
     894866539, 1807160375, -599589627, 498624852, -1271883029]
 
 // Maximum number of playouts to use for MCGS
-const PLAYOUTS = 10000;
+const PLAYOUTS = 30000;
 
 // Hand tuned value for MCGS exploration
 const EXPLORATION_PARAMETER = 0.3;
@@ -25,7 +25,7 @@ const USE_AI_TWEAKS = true;
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = false;
+const ANALYSIS_MODE = true;
 
 // If true, does not do playouts when the child node has
 // more playouts than the edge visit count (due to
@@ -461,7 +461,9 @@ class MCGSNode {
                 continue;
               }
               let off = 5 * (x + dx) + (y + dy);
-              if (board[off] == 1) {
+              if (board[off] == 0) {
+                white_or_offline_neighbors++;
+              } else if (board[off] == 1) {
                 if (liberties[off] == 2) {
                   isatari = true;
                   if (!bigatari) {
@@ -497,8 +499,7 @@ class MCGSNode {
                 } else if (liberties[off] == 1) {
                   iscapture = true;
                 }
-              }
-              if (board[off] == 2) {
+              } else if (board[off] == 2) {
                 white_or_offline_neighbors++;
                 // it also won't play eye moves from a group that has
                 // two eyes, but i don't really feel like checking
@@ -727,26 +728,25 @@ export async function main(ns) {
   if (ANALYSIS_MODE) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
-
-    /*
-        let startTime = Date.now();
-        let cord = linearizeBoard(['.....','.....','.....','.....','.....']);
-        let sum = 0;
-        for (let i = 0; i < 10000; ++i) {
-          sum += fastPlayoutLinear(cord, true, new Set());
-        }
-        ns.print(sum);
-        ns.print('finished in ', Date.now()-startTime, ' ms');
+/*
+        let cord = linearizeBoard([
+      "#..X.",
+      "#....",
+      "#.XX.",
+      "#.OOO",
+      "#.O.O"]
+);
+ns.print(countWhiteEyesLinear(cord));
         return;
-    */
+        */
     // analyze current game state
-    let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
-    let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
+    //let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
+    //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    //let bord = ["..O.O","XXOOO",".XOXO",".XOXO","..XXO"];
-    //let seen = [];
-    //let [q, s, moves] = await getMoves(bord, seen);
+    let bord = ["#....","#....","#.XX.","#.OO.","#.O.O"];
+    let seen = [];
+    let [q, s, moves] = await getMoves(bord, seen);
 
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
