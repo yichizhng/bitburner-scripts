@@ -187,45 +187,18 @@ function getLibertiesLinear(board, liberties) {
 
 /** 
  * @param {Int8Array} position 
- * @param {boolean} immediate if true, ignores liveness analysis
  * */
-function scoreTerminalLinear(board, immediate) {
-  // TODO: redo non-immediate mode (by analyzing chain
-  // liveness, probably)
-  let bl = 0, wl = 0;
-  let wc = 0, bc = 0, ec = 0;
-  for (let x = 0; x < BOARD_SIZE; ++x) {
-    for (let y = 0; y < BOARD_SIZE; ++y) {
-      let off = BOARD_SIZE * x + y;
-      if (board[off] == 1) bc++;
-      if (board[off] == 2) wc++;
-      if (board[off] == 0) {
-        let bn = false, wn = false;
-        for (let [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-          let xx = x + dx, yy = y + dy;
-          if (xx == -1 || xx == BOARD_SIZE || yy == -1 || yy == BOARD_SIZE) continue;
-          let offf = BOARD_SIZE * xx + yy;
-          if (board[offf] == 1) bn = true;
-          if (board[offf] == 2) wn = true;
-        }
-        if (bn) {
-          if (wn) ec++;
-          else bl++;
-        } else {
-          if (wn) wl++;
-          else ec++;
-        }
-      }
-    }
+function scoreTerminalLinear(board) {
+  let territory = getTerritory(board);
+  let bs = 0, ws = 0, es = 0;
+  for (let x of territory) {
+    if (x == 0) es++;
+    if (x == 1) bs++;
+    if (x == 2) ws++;
   }
-  if (immediate) {
-    return bc + bl;
-  }
-
-  if (wl == bl) return bc + bl;  // we assume it's seki or something
-  if (wl >= 2 && bl >= 2) return bc + bl;  // same
-  if (wl > bl) return 0;  // big loss
-  return wc + ec + bc + bl + wl;  // big win
+  if (ws == 0) return es + bs;
+  if (bs == 0) return 0;
+  return bs + es / 2;
 }
 
 /** 
@@ -462,17 +435,7 @@ function fastPlayoutLinear(board, blackToPlay, history) {
     blackToPlay = !blackToPlay;
     history.add(zobristHashLinear(linearBoard, false));
   }
-  let territory = getTerritory(linearBoard);
-  let bs = 0, ws = 0, es = 0;
-  for (let x of territory) {
-    if (x == 0) es++;
-    if (x == 1) bs++;
-    if (x == 2) ws++;
-  }
-  if (ws == 0) return es + bs;
-  if (bs == 0) return 0;
-  return bs + es / 2;
-  //return scoreTerminalLinear(linearBoard, false);
+  return scoreTerminalLinear(linearBoard);
 }
 
 function moveName(x, y) {
@@ -759,7 +722,7 @@ function getMoves(board, seen_hashes = []) {
       let maxweight = 1;
 
       if (lastPassed) {
-        ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board, true)];
+        ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board)];
         let score = (ln.blackToPlay ? 1 : -1) * ln.DP[5];
         // no exploration factor because we know terminal nodes have no variance
         if (score > bestScore) {
@@ -773,6 +736,7 @@ function getMoves(board, seen_hashes = []) {
         if (seen.has(zobristHashLinear(c[2], false)) && c[3]) {
           continue;
         }
+        if (lastPassed && !c[3]) continue;
         // eagerly update cached child pointer
         c[5] ??= map.get(c[0]);
         let stddev = c[5]?.getcPUCT?.() ?? BOARD_SIZE * BOARD_SIZE;
@@ -890,20 +854,12 @@ export async function main(ns) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
-    let cord = linearizeBoard([".O.O.", "..OX.", "..OX#", "O.XXO", ".O.O."]);
-    let sum = 0;
-    for (let i = 0; i < 1000; ++i) {
-      sum += fastPlayoutLinear(cord, true, new Set());
-    }
-    ns.print('average playout value: ', sum / 1000);
-    return;
-
     // analyze current game state
     //let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
     //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord = [".O.O.", "..OX.", "..OX#", "O.XXO", ".O.O."];
+    let bord = [".#OO.","XXXOO","XXOO.",".XXOO","#XXO#"];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, seen);
     ns.print('Q: ', q, ' S: ', s);
