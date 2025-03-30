@@ -666,21 +666,29 @@ class MCGSNode {
 
             if (iscapture) {
               weight = 1000;
+              if (territory[BOARD_SIZE * x + y] != 1) weight++;
             } else if (isdefend && neighborliberties + emptycount > 2) {
               weight = 800;
+              if (territory[BOARD_SIZE * x + y] != 1) weight++;
             } else if (makesEye && isnobi && white_or_offline_neighbors > 1 && emptycount > 0) {
               weight = 600;
+              if (territory[BOARD_SIZE * x + y] != 1) weight++;
             } else if (isatari) {
               if (bigatari) {
                 weight = 400;
+                if (territory[BOARD_SIZE * x + y] != 1) weight++;
               } else {
                 let nb = new Int8Array(board);
                 nb[BOARD_SIZE * x + y] = 2;
                 let nl = new Int8Array(BOARD_SIZE * BOARD_SIZE);
                 getLibertiesLinear(nb, nl);
-                if (nl[BOARD_SIZE * x + y] > 1) weight = 400;
+                if (nl[BOARD_SIZE * x + y] > 1) {
+                  weight = 400;
+                  if (territory[BOARD_SIZE * x + y] != 1) weight++;
+                }
               }
             } else if (territory[BOARD_SIZE * x + y] == 1) {
+              // those moves technically are legal, but the ai doesn't play good invasion moves
               weight = 0;
             }
           }
@@ -768,11 +776,17 @@ function getMoves(board, lp, seen_hashes = []) {
         let score =
           ((ln.blackToPlay ? 1 : -1) *
             q +
+            (c[3] ? 1 : 0.25) *  // penalize pass a bit
             (EXPLORATION_PARAMETER *
               stddev
               * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
           if (c[3] && c[4] < maxweight) continue;
+          if (!c[3] && maxweight > 1 && maxweight % 10 == 1) {
+            // marker for priority moves that aren't culled due to being in black territory
+            // white will not pass if it has such a move available.
+            continue;
+          }
         }
         if (score > bestScore) {
           bestScore = score;
@@ -879,7 +893,7 @@ export async function main(ns) {
     //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord = ["#O.O.","#.OO.","#OXXX","#.OXO","#O.O."];
+    let bord = [".O###","OOOO#","OXOO.","#XXXX",".XX.X"];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
@@ -923,7 +937,7 @@ export async function main(ns) {
       }
       ns.print('Q: ', q, ' S: ', s);
       let moved = false;
-      let passq = 0;
+      let territory = (lastMove.type == 'pass') && getTerritory(linearizeBoard(ns.go.getBoardState()));
       if (q < prevq - 4) {
         ns.tprint('blunder detected');
         ns.tprint(prevboard);
@@ -931,17 +945,14 @@ export async function main(ns) {
       }
       prevboard = ns.go.getBoardState();
       prevq = q;
-      // sweeps a bug under the carpet (fails to recognize some moves as illegal sometimes?)
-      if (q < 2) {
-        lastMove = await ns.go.passTurn();
-        continue;
-      }
       for (let [h, n, q, m] of moves) {
         if (!m) {
-          passq = q;
+          break;
+        }
+        if ((lastMove.type == 'pass') && territory[BOARD_SIZE * m[0] + m[1]] == 1) {
           continue;
         }
-        if (n && q > passq - 2) {
+        if (n) {
           try {
             lastMove = await ns.go.makeMove(...m);
           } catch {
