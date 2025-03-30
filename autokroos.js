@@ -187,14 +187,31 @@ function getLibertiesLinear(board, liberties) {
 
 /** 
  * @param {Int8Array} position 
+ * @param {boolean} immediate if true, scores the board immediately (without removing dead stones)
  * */
-function scoreTerminalLinear(board) {
+function scoreTerminalLinear(board, immediate) {
   let territory = getTerritory(board);
   let bs = 0, ws = 0, es = 0;
-  for (let x of territory) {
-    if (x == 0) es++;
-    if (x == 1) bs++;
-    if (x == 2) ws++;
+  if (immediate) {
+    for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; ++i) {
+      if (board[i] == 0) {
+        if (territory[i] == 1) {
+          bs++;
+        } else if (territory[i] == 2) {
+          ws++;
+        }
+      } else if (board[i] == 1) {
+        bs++;
+      } else if (board[i] == 2) {
+        ws++;
+      }
+    }
+  } else {
+    for (let x of territory) {
+      if (x == 0) es++;
+      if (x == 1) bs++;
+      if (x == 2) ws++;
+    }
   }
   if (ws == 0) return es + bs;
   if (bs == 0) return 0;
@@ -435,7 +452,7 @@ function fastPlayoutLinear(board, blackToPlay, history) {
     blackToPlay = !blackToPlay;
     history.add(zobristHashLinear(linearBoard, false));
   }
-  return scoreTerminalLinear(linearBoard);
+  return scoreTerminalLinear(linearBoard, false);
 }
 
 function moveName(x, y) {
@@ -695,9 +712,10 @@ class MCGSNode {
 
 /** 
  * @param {string[] | string[][]} board 
+ * @param {boolean} lp
  * @param {number[]} seen_hashes
  */
-function getMoves(board, seen_hashes = []) {
+function getMoves(board, lp, seen_hashes = []) {
   let b = linearizeBoard(board);
 
   let map = new Map();
@@ -712,9 +730,9 @@ function getMoves(board, seen_hashes = []) {
       if (root.getcPUCT() < 1) break;
     }
     let seen = new Set(seen_hashes);
+    let lastPassed = lp;
     seen.add(zobristHashLinear(b, false));
     let path = [root];
-    let lastPassed = false;
     while (true) {
       let ln = path.at(-1);
       let bestScore = -Infinity;
@@ -722,7 +740,7 @@ function getMoves(board, seen_hashes = []) {
       let maxweight = 1;
 
       if (lastPassed) {
-        ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board)];
+        ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board, true)];
         let score = (ln.blackToPlay ? 1 : -1) * ln.DP[5];
         // no exploration factor because we know terminal nodes have no variance
         if (score > bestScore) {
@@ -843,11 +861,11 @@ export async function main(ns) {
     resolve?.(e.data);
   }
   ns.atExit(() => worker.terminate(), 'worker');
-  let getMoves = function (d, m) {
+  let getMoves = function (d, l, m) {
     return new Promise((res, rej) => {
       ns.atExit(rej, 'worker_promise')
       resolve = res;
-      worker.postMessage([d, m]);
+      worker.postMessage([d, l, m]);
     });
   }
   if (ANALYSIS_MODE) {
@@ -859,9 +877,15 @@ export async function main(ns) {
     //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord = [".#OO.","XXXOO","XXOO.",".XXOO","#XXO#"];
+    let bord = [
+"XXX.#",
+".XXX#",
+"XX.X.",
+".XXOO",
+"#.OO#"
+];
     let seen = [];
-    let [q, s, moves] = await getMoves(bord, seen);
+    let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
@@ -896,7 +920,7 @@ export async function main(ns) {
 
       let q, s, moves;
       try {
-        [q, s, moves] = await getMoves(ns.go.getBoardState(), seen);
+        [q, s, moves] = await getMoves(ns.go.getBoardState(), lastMove.type == 'pass', seen);
       } catch {
         return;
       }
