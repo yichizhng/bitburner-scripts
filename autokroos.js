@@ -48,7 +48,7 @@ const BITMASKS =
 const BOARD_SIZE = 5;
 
 // Maximum number of playouts to use for MCGS
-const PLAYOUTS = 10000;
+const PLAYOUTS = 30000;
 
 // Hand tuned value for MCGS exploration
 const EXPLORATION_PARAMETER = 0.3;
@@ -62,7 +62,7 @@ const USE_AI_TWEAKS = true;
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = false;
+const ANALYSIS_MODE = true;
 
 // If true, does not do playouts when the child node has
 // more playouts than the edge visit count (due to
@@ -737,7 +737,13 @@ function getMoves(board, lp, seen_hashes = []) {
       let ln = path.at(-1);
       let bestScore = -Infinity;
       let nh = ln.children[0];
-      let maxweight = Math.max(...ln.children.map(x=>x[4]));
+      let maxweight = 1;
+      for (let c of ln.children) {
+        if (seen.has(zobristHashLinear(c[2], false)) && c[3]) {
+          continue;
+        }
+        maxweight = Math.max(maxweight, c[4]);
+      }
 
       if (lastPassed) {
         ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board, true)];
@@ -766,11 +772,7 @@ function getMoves(board, lp, seen_hashes = []) {
               stddev
               * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
-          //if (c[4] > maxweight) {
-          //  maxweight = c[4];
-          //}
           if (c[3] && c[4] < maxweight) continue;
-          //score += 10 * maxweight;
         }
         if (score > bestScore) {
           bestScore = score;
@@ -877,11 +879,7 @@ export async function main(ns) {
     //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord = ["##O.#"
-,".O.O."
-,"XXOOO"
-,".XXOO"
-,"..XXO"];
+    let bord = ["#O.O.","#.OO.","#OXXX","#.OXO","#O.O."];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
@@ -896,7 +894,8 @@ export async function main(ns) {
 
   let start = Date.now();
   let wins = 0;
-  for (let i = 0; i < 100; ++i) {
+  let games = 1000;
+  for (let i = 0; i < games; ++i) {
     let lastMove = {};
     ns.go.resetBoardState('Illuminati', BOARD_SIZE);
     if (RESET_FOR_TENGEN) {
@@ -962,5 +961,5 @@ export async function main(ns) {
     ns.ui.setTailTitle(wins + ' wins of ' + (i + 1) + ' games')
     await ns.asleep(0);
   }
-  ns.print('Average game time was ', (Date.now() - start) / 100000, 'seconds');
+  ns.print('Average game time was ', (Date.now() - start) / (1000 * games), 'seconds');
 }
