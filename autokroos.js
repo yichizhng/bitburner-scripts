@@ -737,7 +737,7 @@ function getMoves(board, lp, seen_hashes = []) {
       let ln = path.at(-1);
       let bestScore = -Infinity;
       let nh = ln.children[0];
-      let maxweight = 1;
+      let maxweight = Math.max(...ln.children.map(x=>x[4]));
 
       if (lastPassed) {
         ln.DP ??= ['t', 0, null, null, 1, scoreTerminalLinear(ln.board, true)];
@@ -766,11 +766,11 @@ function getMoves(board, lp, seen_hashes = []) {
               stddev
               * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
-          if (c[4] > maxweight) {
-            maxweight = c[4];
-          }
-          if (c[4] < maxweight) continue;
-          score += 10 * maxweight;
+          //if (c[4] > maxweight) {
+          //  maxweight = c[4];
+          //}
+          if (c[3] && c[4] < maxweight) continue;
+          //score += 10 * maxweight;
         }
         if (score > bestScore) {
           bestScore = score;
@@ -877,13 +877,11 @@ export async function main(ns) {
     //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
 
     // analyze board
-    let bord = [
-"XXX.#",
-".XXX#",
-"XX.X.",
-".XXOO",
-"#.OO#"
-];
+    let bord = ["##O.#"
+,".O.O."
+,"XXOOO"
+,".XXOO"
+,"..XXO"];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
