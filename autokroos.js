@@ -566,7 +566,7 @@ class MCGSNode {
     this.children = [[this.hash ^ BITMASKS[2 * BOARD_SIZE * BOARD_SIZE], 0, board, null, 1, null]];
 
     let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyesLinear(board);
-    let territory = (USE_AI_TWEAKS && !blackToPlay) && getTerritory(board);
+    let territory = getTerritory(board);
     for (let x = 0; x < BOARD_SIZE; ++x) {
       for (let y = 0; y < BOARD_SIZE; ++y) {
         let nb = new Int8Array(BOARD_SIZE * BOARD_SIZE);
@@ -584,6 +584,7 @@ class MCGSNode {
             let bigatari = false;
             let white_or_offline_neighbors = 0;
             let emptycount = 0;
+            let hasneighbor = false;
             let neighborliberties = 1;
             for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
               if (x + dx == -1 || x + dx == BOARD_SIZE || y + dy == -1 || y + dy == BOARD_SIZE) {
@@ -595,6 +596,7 @@ class MCGSNode {
                 white_or_offline_neighbors++;
               }
               if (board[off] == 1) {
+                hasneighbor = true;
                 if (liberties[off] == 2) {
                   isatari = true;
                   if (!bigatari) {
@@ -632,8 +634,9 @@ class MCGSNode {
                 }
               }
               if (board[off] == 2) {
+                hasneighbor = true;
                 white_or_offline_neighbors++;
-                // it also won't play eye moves from a group that has
+                // it won't play eye moves from a group that has
                 // two eyes, but i don't really feel like checking
                 let islone = true;
                 for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
@@ -690,6 +693,9 @@ class MCGSNode {
             } else if (territory[BOARD_SIZE * x + y] == 1) {
               // those moves technically are legal, but the ai doesn't play good invasion moves
               weight = 0;
+            } else if (!hasneighbor) {
+              if (emptycount < 4) { weight = 0; }
+              // there's actually more logic, but let's leave it at that
             }
           }
         }
@@ -712,9 +718,10 @@ class MCGSNode {
   }
 
   getcPUCT() {
-    return ((BOARD_SIZE * BOARD_SIZE / 2) +
+    const PRIOR_MULTIPLIER = 10;
+    return (PRIOR_MULTIPLIER * Math.sqrt(0.75 * BOARD_SIZE * BOARD_SIZE) +
       this.N * Math.max(0.1,
-        Math.sqrt((this.SS) / (this.N) - ((this.S) / (this.N)) ** 2))) / (this.N + 1);
+        Math.sqrt((this.SS) / (this.N) - ((this.S) / (this.N)) ** 2))) / (this.N + PRIOR_MULTIPLIER);
   }
 }
 
@@ -759,7 +766,6 @@ function getMoves(board, lp, seen_hashes = []) {
         // no exploration factor because we know terminal nodes have no variance
         if (score > bestScore) {
           bestScore = score;
-          nn = ln.DP[5];
           nh = ln.DP;
         }
       }
@@ -790,7 +796,6 @@ function getMoves(board, lp, seen_hashes = []) {
         }
         if (score > bestScore) {
           bestScore = score;
-          bestCount = 1;
           nh = c;
         }
       }
@@ -800,7 +805,6 @@ function getMoves(board, lp, seen_hashes = []) {
       nh[1]++;
       lastPassed = !nh[3];
       if (typeof nh[0] == 'string') {
-        nn = nh[5];
         break;
       }
       seen.add(zobristHashLinear(nh[2], false));
@@ -812,7 +816,6 @@ function getMoves(board, lp, seen_hashes = []) {
         path.push(nh[5]);
       } else {
         nh[5] = new MCGSNode(nh[2], !ln.blackToPlay, map, seen);
-        nn = nh[5].U;
         break;
       }
     }
@@ -859,7 +862,6 @@ function getMoves(board, lp, seen_hashes = []) {
 export async function main(ns) {
   ns.disableLog('asleep');
   ns.clearLog();
-
   if (!Worker) {
     ns.print('Please get a real browser');
     ns.exit();
@@ -890,10 +892,10 @@ export async function main(ns) {
 
     // analyze current game state
     //let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
-    //let [q, s, moves] = await getMoves(ns.go.getBoardState(), seen, false);
+    //let [q, s, moves] = await getMoves(ns.go.getBoardState(), false, seen);
 
     // analyze board
-    let bord = [".O###","OOOO#","OXOO.","#XXXX",".XX.X"];
+    let bord = ["OO#.X",".OOX.","OOOXX","O.OX.","OXX.X"];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
@@ -937,9 +939,8 @@ export async function main(ns) {
       }
       ns.print('Q: ', q, ' S: ', s);
       let moved = false;
-      let territory = (lastMove.type == 'pass') && getTerritory(linearizeBoard(ns.go.getBoardState()));
       if (q < prevq - 4) {
-        ns.tprint('blunder detected');
+        ns.tprint('blunder detected ' + prevq + ' -> ' + q);
         ns.tprint(prevboard);
         ns.tprint(ns.go.getBoardState())
       }
@@ -948,9 +949,6 @@ export async function main(ns) {
       for (let [h, n, q, m] of moves) {
         if (!m) {
           break;
-        }
-        if ((lastMove.type == 'pass') && territory[BOARD_SIZE * m[0] + m[1]] == 1) {
-          continue;
         }
         if (n) {
           try {
