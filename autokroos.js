@@ -563,7 +563,7 @@ class MCGSNode {
     getLibertiesLinear(board, liberties);
 
     /** @type [number, number, Int8Array, [number,number]|null, number, MCGSNode|null][] */
-    this.children = [[this.hash ^ BITMASKS[2 * BOARD_SIZE * BOARD_SIZE], 0, board, null, 1, null]];
+    this.children = [[this.hash ^ BITMASKS[2 * BOARD_SIZE * BOARD_SIZE], 0, board, null, -1, null]];
 
     let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyesLinear(board);
     let territory = getTerritory(board);
@@ -718,10 +718,10 @@ class MCGSNode {
   }
 
   getcPUCT() {
-    const PRIOR_MULTIPLIER = 10;
+    const PRIOR_MULTIPLIER = 1;
     return (PRIOR_MULTIPLIER * Math.sqrt(0.75 * BOARD_SIZE * BOARD_SIZE) +
       this.N * Math.max(0.1,
-        Math.sqrt((this.SS) / (this.N) - ((this.S) / (this.N)) ** 2))) / (this.N + PRIOR_MULTIPLIER);
+        Math.sqrt((this.SS) / (this.N) - (this.S / this.N) ** 2))) / (this.N + PRIOR_MULTIPLIER);
   }
 }
 
@@ -811,7 +811,9 @@ function getMoves(board, lp, seen_hashes = []) {
       nh[5] ??= map.get(nh[0]);
       if (nh[5]) {
         if (SUPPRESS_TRANSPOSITION) {
-          if (nh[1] <= nh[5].N) break;
+          if (nh[1] <= nh[5].N) { 
+            break;
+          }
         }
         path.push(nh[5]);
       } else {
@@ -895,7 +897,7 @@ export async function main(ns) {
     //let [q, s, moves] = await getMoves(ns.go.getBoardState(), false, seen);
 
     // analyze board
-    let bord = ["OO#.X",".OOX.","OOOXX","O.OX.","OXX.X"];
+    let bord =  [".O#.#","O..O.",".X...","OX...",".O.#."];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
