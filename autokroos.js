@@ -692,9 +692,9 @@ class MCGSNode {
               }
             } else if (territory[BOARD_SIZE * x + y] == 1) {
               // those moves technically are legal, but the ai doesn't play good invasion moves
-              weight = 0;
+              weight = -1;
             } else if (!hasneighbor) {
-              if (emptycount < 4) { weight = 0; }
+              if (emptycount < 4) { weight = -1; }
               // there's actually more logic, but let's leave it at that
             }
           }
