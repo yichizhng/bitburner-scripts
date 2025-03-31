@@ -781,7 +781,7 @@ function getMoves(board, lp, seen_hashes = []) {
               stddev
               * Math.sqrt(ln.N) / (1 + c[1])));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
-          if (c[3] && c[4] < maxweight) continue;
+          if (c[3] && c[4] < maxweight - 1) continue;
           if (!c[3] && maxweight > 1 && maxweight % 10 == 1) {
             // marker for priority moves that aren't culled due to being in black territory
             // white will not pass if it has such a move available.
