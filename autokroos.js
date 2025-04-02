@@ -154,33 +154,40 @@ function deLinearizeBoard(linearBoard) {
  * @param {Int8Array} board linearized board to analyze
  * @param {Int8Array} buffer output buffer for liberties
  */
+/** 
+ * @param {Int8Array} board linearized board to analyze
+ * @param {Int8Array} buffer output buffer for liberties
+ */
 function getLibertiesLinear(board, liberties) {
   liberties.fill(-1);
-  let seen = new Int8Array(BOARD_SIZE * BOARD_SIZE);
-  for (let x = 0; x < BOARD_SIZE; ++x) {
-    for (let y = 0; y < BOARD_SIZE; ++y) {
-      if (liberties[BOARD_SIZE * x + y] == -1 && (board[BOARD_SIZE * x + y] > 0)) {
-        let l = 0;
-        let group = [[x, y]];
-        seen.fill(0);
-        seen[BOARD_SIZE * x + y] = 1;
-        for (let i = 0; i < group.length; ++i) {
-          for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-            let xx = group[i][0] + dx, yy = group[i][1] + dy;
-            if (xx == -1 || xx == BOARD_SIZE || yy == -1 || yy == BOARD_SIZE) continue;
-            if (seen[BOARD_SIZE * xx + yy]) continue;
-            seen[BOARD_SIZE * xx + yy] = 1;
-            if (board[BOARD_SIZE * xx + yy] == board[BOARD_SIZE * x + y]) {
-              group.push([xx, yy])
-            } else if (board[BOARD_SIZE * xx + yy] == 0) {
-              l++;
-            }
-          }
-        }
-        for (let [xx, yy] of group) {
-          liberties[BOARD_SIZE * xx + yy] = l;
-        }
-      }
+  var seen = new Int8Array(BOARD_SIZE * BOARD_SIZE);
+  function check(idx) {
+    if (!seen[idx]) {
+      seen[idx] = 1;
+      if (board[idx] == c) {
+	    group.push(idx);
+	  } else if (board[idx] == 0) {
+	    l++;
+	  }
+    }
+  }
+  for (var pos = 0; pos < BOARD_SIZE * BOARD_SIZE; ++pos) {
+    if (liberties[pos] != -1 || board[pos] <= 0) continue;
+	var l = 0;
+	var group = [pos];
+	var c = board[pos];
+	seen.fill(0);
+	seen[pos] = 1;
+	// hopefully this gets inlined? otherwise unroll it manually
+	for (var i = 0; i < group.length; ++i) {
+	  var x = group[i];
+      if (x % BOARD_SIZE > 0) check(x-1);
+      if ((x+1) % BOARD_SIZE) check(x+1);
+	  if (x >= BOARD_SIZE) check(x - BOARD_SIZE);
+	  if (x < BOARD_SIZE * (BOARD_SIZE - 1)) check(x + BOARD_SIZE);	  
+	}
+	for (var g of group) {  
+	  liberties[g] = l;
     }
   }
 }
@@ -892,14 +899,43 @@ export async function main(ns) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
+    {
+      let cord = linearizeBoard([
+        '.....',
+        '.....',
+        '.....',
+        '.....',
+        '.....'
+      ]);
+      let scores = new Array(26).fill(0);
+      for (let i = 0; i < 100000; ++i) {
+        let score = fastPlayoutLinear(cord, true, new Set());
+        scores[score]++;
+      }
+      ns.print(scores);
+      return;
+    }
+    /*
     // analyze current game state
-    //let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
-    //let [q, s, moves] = await getMoves(ns.go.getBoardState(), false, seen);
+    let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
+    let [q, s, moves] = await getMoves(ns.go.getBoardState(), false, seen);
+    ns.go.analysis.clearAllPointHighlights();
+    for (let i = 0; i < moves.length; ++i) {
+      let [h,n,mq,m] = moves[i];
+      if (m) {
+        let color = '#00FF00';
+        if (i > 0) color = '#AACC00';
+        if (i > 5) color = 'none';
+        ns.go.analysis.highlightPoint(m[0], m[1], color, (mq-q).toFixed(2));
+      }
+    }
+    //*/
+
 
     // analyze board
-    let bord =  [".O#.#","O..O.",".X...","OX...",".O.#."];
-    let seen = [];
-    let [q, s, moves] = await getMoves(bord, true, seen);
+    //let bord =  [".O#.#","O..O.",".X...","OX...",".O.#."];
+    //let seen = [];
+    //let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
