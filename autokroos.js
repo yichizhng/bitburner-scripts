@@ -365,7 +365,7 @@ function fastPlayoutLinear(board, blackToPlay, history) {
   linearBoard.set(board);
   getLibertiesLinear(linearBoard, liberties);
   let lastPassed = false;
-  let maxIters = 1.5 * BOARD_SIZE * BOARD_SIZE;
+  let maxIters = 0.5 * BOARD_SIZE * BOARD_SIZE;
   function check(idx) {
     if (linearBoard[idx] == 0) {
       legal = true;
@@ -389,27 +389,27 @@ function fastPlayoutLinear(board, blackToPlay, history) {
   for (let i = 0; i < maxIters; ++i) {
     // pick a non-dumb move at random, defaulting to pass
     // (a move is dumb if it fills in an eye for no reason)
-    
+
     // TODO: it's potentially better to use RAVE for the playout policy
     let moves = [];
     for (let pos = 0; pos < BOARD_SIZE * BOARD_SIZE; ++pos) {
       if (linearBoard[pos]) continue;
       var legal = false;
       var fillsEye = true;
-      if (pos % BOARD_SIZE > 0) check(pos-1);
-      if ((pos+1) % BOARD_SIZE) check(pos+1);
-	    if (pos >= BOARD_SIZE) check(pos - BOARD_SIZE);
-	    if (pos < BOARD_SIZE * (BOARD_SIZE - 1)) check(pos + BOARD_SIZE);
-      
+      if (pos % BOARD_SIZE > 0) check(pos - 1);
+      if ((pos + 1) % BOARD_SIZE) check(pos + 1);
+      if (pos >= BOARD_SIZE) check(pos - BOARD_SIZE);
+      if (pos < BOARD_SIZE * (BOARD_SIZE - 1)) check(pos + BOARD_SIZE);
+
       if (legal && !fillsEye) moves.push(pos);
     }
-    
+
     while (moves.length) {
       // Pick a move at random
       let i = Math.floor(Math.random() * moves.length);
       let pos = moves[i];
 
-      let legal = addMoveLinear(linearBoard, nextBoard, liberties, (pos/BOARD_SIZE)|0, (pos%BOARD_SIZE), blackToPlay);
+      let legal = addMoveLinear(linearBoard, nextBoard, liberties, (pos / BOARD_SIZE) | 0, (pos % BOARD_SIZE), blackToPlay);
       if (!legal) {
         moves.splice(i, 1);
         console.error('illegal move attempted in fastPlayoutLinear');
@@ -427,22 +427,22 @@ function fastPlayoutLinear(board, blackToPlay, history) {
         // atari is silly
         let alreadyDying = true;
         if (pos % BOARD_SIZE > 0) {
-          if (board[pos-1] == (blackToPlay ? 1 : 2) && (liberties[pos-1] > 1)) {
+          if (board[pos - 1] == (blackToPlay ? 1 : 2) && (liberties[pos - 1] > 1)) {
             alreadyDying = false;
           }
         }
-        if ((pos+1) % BOARD_SIZE) {
-          if (board[pos+1] == (blackToPlay ? 1 : 2) && (liberties[pos+1] > 1)) {
+        if ((pos + 1) % BOARD_SIZE) {
+          if (board[pos + 1] == (blackToPlay ? 1 : 2) && (liberties[pos + 1] > 1)) {
             alreadyDying = false;
           }
         }
-	    if (pos >= BOARD_SIZE) {
-          if (board[pos-BOARD_SIZE] == (blackToPlay ? 1 : 2) && (liberties[pos-BOARD_SIZE] > 1)) {
+        if (pos >= BOARD_SIZE) {
+          if (board[pos - BOARD_SIZE] == (blackToPlay ? 1 : 2) && (liberties[pos - BOARD_SIZE] > 1)) {
             alreadyDying = false;
           }
         }
-	    if (pos < BOARD_SIZE * (BOARD_SIZE - 1)) {
-          if (board[pos+BOARD_SIZE] == (blackToPlay ? 1 : 2) && (liberties[pos+BOARD_SIZE] > 1)) {
+        if (pos < BOARD_SIZE * (BOARD_SIZE - 1)) {
+          if (board[pos + BOARD_SIZE] == (blackToPlay ? 1 : 2) && (liberties[pos + BOARD_SIZE] > 1)) {
             alreadyDying = false;
           }
         }
@@ -712,9 +712,6 @@ class MCGSNode {
                   if (territory[BOARD_SIZE * x + y] != 1) weight++;
                 }
               }
-            } else if (territory[BOARD_SIZE * x + y] == 1) {
-              // those moves technically are legal, but the ai doesn't play good invasion moves
-              weight = -1;
             } else if (!hasneighbor) {
               if (emptycount < 4) { weight = -1; }
               // there's actually more logic, but let's leave it at that
@@ -914,22 +911,6 @@ export async function main(ns) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
-    {
-      let cord = linearizeBoard([
-        '.....',
-        '.....',
-        '.....',
-        '.....',
-        '.....'
-      ]);
-      let scores = new Array(26).fill(0);
-      for (let i = 0; i < 100000; ++i) {
-        let score = fastPlayoutLinear(cord, true, new Set());
-        scores[score]++;
-      }
-      ns.print(scores);
-      return;
-    }
     /*
     // analyze current game state
     let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
@@ -948,9 +929,9 @@ export async function main(ns) {
 
 
     // analyze board
-    //let bord =  [".O#.#","O..O.",".X...","OX...",".O.#."];
-    //let seen = [];
-    //let [q, s, moves] = await getMoves(bord, true, seen);
+    let bord = ["#.XO#",".XXO.",".XOOO",".XXOO","##XO."];
+    let seen = [];
+    let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
