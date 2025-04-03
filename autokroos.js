@@ -48,7 +48,7 @@ const BITMASKS =
 const BOARD_SIZE = 5;
 
 // Maximum number of playouts to use for MCGS
-const PLAYOUTS = 10000;
+const PLAYOUTS = 30000;
 
 // Hand tuned value for MCGS exploration
 const EXPLORATION_PARAMETER = 0.3;
@@ -62,7 +62,7 @@ const USE_AI_TWEAKS = true;
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = false;
+const ANALYSIS_MODE = true;
 
 // If true, does not do playouts when the child node has
 // more playouts than the edge visit count (due to
@@ -782,11 +782,13 @@ function getMoves(board, lp, seen_hashes = []) {
       let nh = ln.children[0];
       let maxweight = 1;
       for (let c of ln.children) {
-        //if (seen.has(c.hash ^ (ln.blackToPlay ? 0 : BITMASKS[2 * BOARD_SIZE * BOARD_SIZE])) && c.pos != -1) {
-        if (seen.has(zobristHashLinear(c.board, false)) && c.pos != -1) {
-          continue;
+        if (c.weight > maxweight) {
+          if (seen.has(c.hash ^ (ln.blackToPlay ? 0 : BITMASKS[2 * BOARD_SIZE * BOARD_SIZE])) && c.pos != -1) {
+          //if (seen.has(zobristHashLinear(c.board, false)) && c.pos != -1) {
+            continue;
+          }
+          maxweight = c.weight;
         }
-        maxweight = Math.max(maxweight, c.weight);
       }
 
       if (lastPassed) {
@@ -800,8 +802,8 @@ function getMoves(board, lp, seen_hashes = []) {
       }
 
       for (let c of ln.children) {
-        // if (seen.has(c.hash ^ (ln.blackToPlay ? 0 : BITMASKS[2 * BOARD_SIZE * BOARD_SIZE])) && c.pos != -1) {
-        if (seen.has(zobristHashLinear(c.board, false)) && c.pos != -1) {
+        if (seen.has(c.hash ^ (ln.blackToPlay ? 0 : BITMASKS[2 * BOARD_SIZE * BOARD_SIZE])) && c.pos != -1) {
+        // if (seen.has(zobristHashLinear(c.board, false)) && c.pos != -1) {
           continue;
         }
 
@@ -898,6 +900,7 @@ function getMoves(board, lp, seen_hashes = []) {
 export async function main(ns) {
   ns.disableLog('asleep');
   ns.clearLog();
+  /*
   if (!Worker) {
     ns.print('Please get a real browser');
     ns.exit();
@@ -921,6 +924,7 @@ export async function main(ns) {
       worker.postMessage([d, l, m]);
     });
   }
+  */
   if (ANALYSIS_MODE) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
