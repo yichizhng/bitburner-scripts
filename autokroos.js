@@ -759,7 +759,7 @@ class MCGSNode {
   }
 
   getcPUCT() {
-    const PRIOR_MULTIPLIER = 1;
+    const PRIOR_MULTIPLIER = 10;
     return (PRIOR_MULTIPLIER * Math.sqrt(0.75 * BOARD_SIZE * BOARD_SIZE) +
       this.N * Math.max(0.1,
         Math.sqrt((this.SS) / (this.N) - (this.S / this.N) ** 2))) / (this.N + PRIOR_MULTIPLIER);
@@ -952,7 +952,7 @@ export async function main(ns) {
     //*/
 
     //* analyze board
-    let bord = [".O...","XXX..","OOOO.","OX.X.",".O#.."];
+    let bord = ["OOO..","XO.X.","XXOO.",".....","....."];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
@@ -968,7 +968,6 @@ export async function main(ns) {
     return;
   }
 
-  ns.go.analysis.resetStats(true)
   let start = Date.now();
   let wins = 0;
   let games = 1000;
