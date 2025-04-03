@@ -48,7 +48,7 @@ const BITMASKS =
 const BOARD_SIZE = 5;
 
 // Maximum number of playouts to use for MCGS
-const PLAYOUTS = 30000;
+const PLAYOUTS = 10000;
 
 // Hand tuned value for MCGS exploration
 const EXPLORATION_PARAMETER = 0.3;
@@ -62,7 +62,7 @@ const USE_AI_TWEAKS = true;
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = true;
+const ANALYSIS_MODE = false;
 
 // If true, does not do playouts when the child node has
 // more playouts than the edge visit count (due to
