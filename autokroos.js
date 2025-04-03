@@ -569,6 +569,25 @@ function countWhiteEyesLinear(board) {
   return eyeCount;
 }
 
+class MCGSEdge {
+  constructor(hash, board, pos, weight) {
+    /** @type {number} */
+    this.hash = hash;
+    /** @type {number} */
+    this.pos = pos;
+    /** @type Int32Array */
+    this.board = board;
+    /** @type {number} */
+    this.weight = weight;
+    /** @type {number} */
+    this.visits = 0;
+    /** @type {MCGSNode | null} */
+    this.nn = null;
+    /** @type {number} */
+    this.value = 0;
+  }
+}
+
 class MCGSNode {
   /**
    * @param {Int8Array} board
@@ -584,8 +603,8 @@ class MCGSNode {
     let liberties = new Int8Array(BOARD_SIZE * BOARD_SIZE);
     getLibertiesLinear(board, liberties);
 
-    /** @type [number, number, Int8Array, [number,number]|null, number, MCGSNode|null][] */
-    this.children = [[this.hash ^ BITMASKS[2 * BOARD_SIZE * BOARD_SIZE], 0, board, null, -1, null]];
+    /** @type MCGSEdge[] */
+    this.children = [new MCGSEdge(this.hash ^ BITMASKS[2 * BOARD_SIZE * BOARD_SIZE], board, -1, 0)];
 
     let whiteEyes = (USE_AI_TWEAKS && !blackToPlay) && countWhiteEyesLinear(board);
     let territory = getTerritory(board);
@@ -716,7 +735,7 @@ class MCGSNode {
             }
           }
         }
-        this.children.push([hash, 0, nb, [x, y], weight, null]);
+        this.children.push(new MCGSEdge(hash, nb, x * BOARD_SIZE + y, weight));
       }
     }
     map.set(this.hash, this);
@@ -735,7 +754,7 @@ class MCGSNode {
   }
 
   getcPUCT() {
-    const PRIOR_MULTIPLIER = 1;
+    const PRIOR_MULTIPLIER = 10;
     return (PRIOR_MULTIPLIER * Math.sqrt(0.75 * BOARD_SIZE * BOARD_SIZE) +
       this.N * Math.max(0.1,
         Math.sqrt((this.SS) / (this.N) - (this.S / this.N) ** 2))) / (this.N + PRIOR_MULTIPLIER);
@@ -753,14 +772,6 @@ function getMoves(board, lp, seen_hashes = []) {
   let map = new Map();
   let root = new MCGSNode(b, true, map, new Set([seen_hashes]));
   for (let i = 0; i < PLAYOUTS; ++i) {
-    if (i % 2000 == 1999) {
-      let c = root.children.reduce((x, y) => y[1] > x[1] ? y : x);
-      if (c[1] >= 0.5 * PLAYOUTS) {
-        break;
-      }
-      // stop if we're pretty sure how it's going to go
-      if (root.getcPUCT() < 1) break;
-    }
     let seen = new Set(seen_hashes);
     let lastPassed = lp;
     seen.add(zobristHashLinear(b, false));
@@ -771,10 +782,11 @@ function getMoves(board, lp, seen_hashes = []) {
       let nh = ln.children[0];
       let maxweight = 1;
       for (let c of ln.children) {
-        if (seen.has(zobristHashLinear(c[2], false)) && c[3]) {
+        //if (seen.has(c.hash ^ (ln.blackToPlay ? 0 : BITMASKS[2 * BOARD_SIZE * BOARD_SIZE])) && c.pos != -1) {
+        if (seen.has(zobristHashLinear(c.board, false)) && c.pos != -1) {
           continue;
         }
-        maxweight = Math.max(maxweight, c[4]);
+        maxweight = Math.max(maxweight, c.weight);
       }
 
       if (lastPassed) {
@@ -788,24 +800,26 @@ function getMoves(board, lp, seen_hashes = []) {
       }
 
       for (let c of ln.children) {
-        if (seen.has(zobristHashLinear(c[2], false)) && c[3]) {
+        // if (seen.has(c.hash ^ (ln.blackToPlay ? 0 : BITMASKS[2 * BOARD_SIZE * BOARD_SIZE])) && c.pos != -1) {
+        if (seen.has(zobristHashLinear(c.board, false)) && c.pos != -1) {
           continue;
         }
-        if (lastPassed && !c[3]) continue;
+
+        if (lastPassed && c.pos == -1) continue;
         // eagerly update cached child pointer
-        c[5] ??= map.get(c[0]);
-        let stddev = c[5]?.getcPUCT?.() ?? BOARD_SIZE * BOARD_SIZE;
-        let q = c[5] ? c[5].S / c[5].N : ln.S / ln.N;
+        c.nn ??= map.get(c.hash);
+        let stddev = c.nn?.getcPUCT?.() ?? BOARD_SIZE * BOARD_SIZE;
+        let q = c.nn ? c.nn.S / c.nn.N : ln.S / ln.N;
         let score =
           ((ln.blackToPlay ? 1 : -1) *
             q +
-            (c[3] ? 1 : 0.25) *  // penalize pass a bit
+            ((c.pos != -1) ? 1 : 0.25) *  // penalize pass a bit
             (EXPLORATION_PARAMETER *
               stddev
-              * Math.sqrt(ln.N) / (1 + c[1])));
+              * Math.sqrt(ln.N) / (1 + c.visits)));
         if (USE_AI_TWEAKS && !ln.blackToPlay) {
-          if (c[3] && c[4] < maxweight - 1) continue;
-          if (!c[3] && maxweight > 1 && maxweight % 10 == 1) {
+          if (c.pos != -1 && c.weight < maxweight - 1) continue;
+          if (c.pos == -1 && maxweight > 1 && maxweight % 10 == 1) {
             // marker for priority moves that aren't culled due to being in black territory
             // white will not pass if it has such a move available.
             continue;
@@ -819,22 +833,22 @@ function getMoves(board, lp, seen_hashes = []) {
 
       // Update node statistics
       ln.N++;
-      nh[1]++;
-      lastPassed = !nh[3];
-      if (typeof nh[0] == 'string') {
+      nh.visits++;
+      if (nh == ln.DP) {
         break;
       }
-      seen.add(zobristHashLinear(nh[2], false));
-      nh[5] ??= map.get(nh[0]);
-      if (nh[5]) {
+      lastPassed = (nh.pos == -1);
+
+      seen.add(zobristHashLinear(nh.board, false));
+      if (nh.nn) {
         if (SUPPRESS_TRANSPOSITION) {
-          if (nh[1] <= nh[5].N) {
+          if (nh.visits <= nh.nn.N) {
             break;
           }
         }
-        path.push(nh[5]);
+        path.push(nh.nn);
       } else {
-        nh[5] = new MCGSNode(nh[2], !ln.blackToPlay, map, seen);
+        nh.nn = new MCGSNode(nh.board, !ln.blackToPlay, map, seen);
         break;
       }
     }
@@ -843,10 +857,10 @@ function getMoves(board, lp, seen_hashes = []) {
       let node = path[i];
       let s = 0, ss = 0;
       for (let c of node.children) {
-        let cn = c[5] ??= map.get(c[0]);
+        let cn = c.nn ??= map.get(c.hash);
         if (!cn) continue;
-        s += c[1] * cn.S / cn.N;
-        ss += c[1] * cn.SS / cn.N;
+        s += c.visits * cn.S / cn.N;
+        ss += c.visits * cn.SS / cn.N;
       }
       if (node.DP) {
         s += node.DP[1] * node.DP[5];
@@ -858,19 +872,22 @@ function getMoves(board, lp, seen_hashes = []) {
   }
   if (root.DP) {
     // white passed last move; DP replaces the pass node
-    root.children[0] = root.DP;
+    root.children[0].visits = root.DP[1];
+    root.children[0].value = root.DP[5];
   }
-  let children = root.children.toSorted((x, y) => y[1] - x[1]);
+  let children = root.children.toSorted((x, y) => y.visits - x.visits);
   for (let c of children) {
-    c[2] = c[5] ? c[5].S / c[5].N : 0;
+    if (c.nn) {
+      c.value = c.nn.S / c.nn.N;
+    }
   }
   if (ANALYSIS_MODE) {
     let refutation = children[0][5]?.children;
     if (refutation) {
-      refutation.sort((x, y) => y[1] - x[1]);
+      refutation.sort((x, y) => y.visits - x.visits);
       for (let r of refutation) {
-        console.log(r[3] ? moveName(...r[3]) : 'pass', r[1], r[4]);
-        console.log(r[5]?.S / r[5]?.N)
+        console.log(r.pos == -1 ? 'pass' : moveName(0|(r.pos/BOARD_SIZE),r.pos%BOARD_SIZE), r.visits, r.weight);
+        console.log(r.nn?.S / r.nn?.N)
       }
     }
   }
@@ -885,7 +902,6 @@ export async function main(ns) {
     ns.print('Please get a real browser');
     ns.exit();
   }
-
   let worker_script = ns.read(ns.getScriptName()).split('export')[0] + `
   onmessage = function(e) {
     postMessage(getMoves(...e.data));
@@ -909,23 +925,25 @@ export async function main(ns) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
 
-    /*
+    //*
     // analyze current game state
     let seen = ns.go.getMoveHistory().map(x => zobristHash(x, false));
     let [q, s, moves] = await getMoves(ns.go.getBoardState(), false, seen);
     ns.go.analysis.clearAllPointHighlights();
     for (let i = 0; i < moves.length; ++i) {
-      let [h,n,mq,m] = moves[i];
-      if (m) {
+      let e = moves[i];
+
+      if (e.pos != -1) {
+        let x = (e.pos/BOARD_SIZE)|0, y = e.pos%BOARD_SIZE;
         let color = '#00FF00';
         if (i > 0) color = '#AACC00';
         if (i > 5) color = 'none';
-        ns.go.analysis.highlightPoint(m[0], m[1], color, (mq-q).toFixed(2));
+        ns.go.analysis.highlightPoint(x, y, color, (e.value-q).toFixed(2));
       }
     }
     //*/
 
-    // analyze board
+    /* analyze board
     let bord = ["#..##","#.O..","#.OO.","#X.X.","#.#.#"];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, false, seen);
@@ -936,6 +954,7 @@ export async function main(ns) {
       //  ns.print('illegal due to superko rule')
       //}
     }
+    //*/
     return;
   }
 
@@ -977,13 +996,13 @@ export async function main(ns) {
       }
       prevboard = ns.go.getBoardState();
       prevq = q;
-      for (let [h, n, q, m] of moves) {
-        if (!m) {
+      for (let e of moves) {
+        if (e.pos == -1) {
           break;
         }
-        if (n) {
+        if (e.visits) {
           try {
-            lastMove = await ns.go.makeMove(...m);
+            lastMove = await ns.go.makeMove((e.pos/BOARD_SIZE)|0, e.pos%BOARD_SIZE);
           } catch {
             continue;
           }
