@@ -364,7 +364,7 @@ function fastPlayoutLinear(board, blackToPlay, history) {
   linearBoard.set(board);
   getLibertiesLinear(linearBoard, liberties);
   let lastPassed = false;
-  let maxIters = 0.5 * BOARD_SIZE * BOARD_SIZE;
+  let maxIters = 1.5 * BOARD_SIZE * BOARD_SIZE;
   function check(idx) {
     if (linearBoard[idx] == 0) {
       legal = true;
