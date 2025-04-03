@@ -900,7 +900,6 @@ function getMoves(board, lp, seen_hashes = []) {
 export async function main(ns) {
   ns.disableLog('asleep');
   ns.clearLog();
-  /*
   if (!Worker) {
     ns.print('Please get a real browser');
     ns.exit();
@@ -924,7 +923,6 @@ export async function main(ns) {
       worker.postMessage([d, l, m]);
     });
   }
-  */
   if (ANALYSIS_MODE) {
     ns.clearLog()
     ns.ui.setTailTitle('Analysis mode')
