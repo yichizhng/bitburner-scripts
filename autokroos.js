@@ -686,9 +686,6 @@ class MCGSNode {
                 makesEye = true;
               }
             }
-            if (x == 2 && y == 4) {
-              debugger;
-            }
 
             if (iscapture) {
               weight = 1000;
