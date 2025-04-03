@@ -62,7 +62,7 @@ const USE_AI_TWEAKS = true;
 const RESET_FOR_TENGEN = false;
 
 // Switch for debugging
-const ANALYSIS_MODE = false;
+const ANALYSIS_MODE = true;
 
 // If true, does not do playouts when the child node has
 // more playouts than the edge visit count (due to
@@ -664,8 +664,7 @@ class MCGSNode {
                 for (let [ddx, ddy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
                   if (x + dx + ddx == -1 || x + dx + ddx == BOARD_SIZE ||
                     y + dy + ddy == -1 || y + dy + ddy == BOARD_SIZE) continue;
-                  if (board[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] == 2
-                    && liberties[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] <= 5) islone = false;
+                  if (board[BOARD_SIZE * (x + dx + ddx) + y + dy + ddy] == 2) islone = false;
                 }
                 if (!islone) isnobi = true;
                 if (liberties[off] == 1) {
@@ -677,16 +676,18 @@ class MCGSNode {
               if (board[off] == 0) {
                 emptycount++;
               }
-              if (board[off] == '#') {
-                white_or_offline_neighbors++;
-              }
             }
             let makesEye = false;
             if (!iscapture && !isdefend && isnobi && whiteEyes < 2) {
               let nb = new Int8Array(board);
               nb[BOARD_SIZE * x + y] = 2;
               let newWhiteEyes = countWhiteEyesLinear(nb);
-              if (newWhiteEyes > whiteEyes) makesEye = true;
+              if (newWhiteEyes > whiteEyes) {
+                makesEye = true;
+              }
+            }
+            if (x == 2 && y == 4) {
+              debugger;
             }
 
             if (iscapture) {
@@ -927,11 +928,10 @@ export async function main(ns) {
     }
     //*/
 
-
     // analyze board
-    let bord = ["#.XO#",".XXO.",".XOOO",".XXOO","##XO."];
+    let bord = ["#..##","#.O..","#.OO.","#X.X.","#.#.#"];
     let seen = [];
-    let [q, s, moves] = await getMoves(bord, true, seen);
+    let [q, s, moves] = await getMoves(bord, false, seen);
     ns.print('Q: ', q, ' S: ', s);
     for (let [h, n, q, m] of moves) {
       ns.print(m ? moveName(...m) : 'pass', ' N = ', n, ' Q = ', q);
