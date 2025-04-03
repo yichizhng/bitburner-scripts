@@ -94,12 +94,11 @@ function zobristHashLinear(board, blackToPlay) {
   // whether the last move was pass, because we don't
   // want to conflate those game states.
   var n = 0;
-  for (var x = 0; x < BOARD_SIZE; ++x) {
-    for (var y = 0; y < BOARD_SIZE; ++y) {
-      if (board[BOARD_SIZE * x + y] == 2)
-        n ^= BITMASKS[2 * (BOARD_SIZE * x + y)];
-      if (board[BOARD_SIZE * x + y] == 1)
-        n ^= BITMASKS[2 * (BOARD_SIZE * x + y) + 1];
+  for (var pos = 0; pos < BOARD_SIZE * BOARD_SIZE; ++pos) {
+    if (board[pos] == 1) {
+      n ^= BITMASKS[2*pos + 1];
+    } else if (board[pos] == 2) {
+      n ^= BITMASKS[2*pos];
     }
   }
   if (blackToPlay) {
@@ -639,7 +638,7 @@ class MCGSNode {
               }
               if (board[off] == 1) {
                 hasneighbor = true;
-                if (liberties[off] == 3) issurround = true;
+                if (liberties[off] <= 4) issurround = true;
                 if (liberties[off] == 2) {
                   isatari = true;
                   if (!bigatari) {
@@ -735,6 +734,8 @@ class MCGSNode {
               // jump (this isn't true on a larger board because of corner
               // moves, but it is true on 3x3)
               if (!hasneighbor && emptycount < 4) { weight = -1; }
+              // there's another requirement (won't attack length 2 groups) but
+              // it's not that important i think
               if (!issurround && territory[BOARD_SIZE*x + y == 1]) { weight = -1; }
             }
           }
@@ -758,7 +759,7 @@ class MCGSNode {
   }
 
   getcPUCT() {
-    const PRIOR_MULTIPLIER = 10;
+    const PRIOR_MULTIPLIER = 1;
     return (PRIOR_MULTIPLIER * Math.sqrt(0.75 * BOARD_SIZE * BOARD_SIZE) +
       this.N * Math.max(0.1,
         Math.sqrt((this.SS) / (this.N) - (this.S / this.N) ** 2))) / (this.N + PRIOR_MULTIPLIER);
@@ -889,7 +890,7 @@ function getMoves(board, lp, seen_hashes = []) {
     }
   }
   if (ANALYSIS_MODE) {
-    let refutation = children[0][5]?.children;
+    let refutation = children[0].nn?.children;
     if (refutation) {
       refutation.sort((x, y) => y.visits - x.visits);
       for (let r of refutation) {
@@ -951,12 +952,7 @@ export async function main(ns) {
     //*/
 
     //* analyze board
-    let bord = [
-      "##X.#",
-      "#XXX.",
-      "#XXX#",
-      "XXOO.",
-      "XX#.#"];
+    let bord = [".O...","XXX..","OOOO.","OX.X.",".O#.."];
     let seen = [];
     let [q, s, moves] = await getMoves(bord, true, seen);
     ns.print('Q: ', q, ' S: ', s);
@@ -972,6 +968,7 @@ export async function main(ns) {
     return;
   }
 
+  ns.go.analysis.resetStats(true)
   let start = Date.now();
   let wins = 0;
   let games = 1000;
