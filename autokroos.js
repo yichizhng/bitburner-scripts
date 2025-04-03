@@ -165,29 +165,29 @@ function getLibertiesLinear(board, liberties) {
     if (!seen[idx]) {
       seen[idx] = 1;
       if (board[idx] == c) {
-	    group.push(idx);
-	  } else if (board[idx] == 0) {
-	    l++;
-	  }
+        group.push(idx);
+      } else if (board[idx] == 0) {
+        l++;
+      }
     }
   }
   for (var pos = 0; pos < BOARD_SIZE * BOARD_SIZE; ++pos) {
     if (liberties[pos] != -1 || board[pos] <= 0) continue;
-	var l = 0;
-	var group = [pos];
-	var c = board[pos];
-	seen.fill(0);
-	seen[pos] = 1;
-	// hopefully this gets inlined? otherwise unroll it manually
-	for (var i = 0; i < group.length; ++i) {
-	  var x = group[i];
-      if (x % BOARD_SIZE > 0) check(x-1);
-      if ((x+1) % BOARD_SIZE) check(x+1);
-	  if (x >= BOARD_SIZE) check(x - BOARD_SIZE);
-	  if (x < BOARD_SIZE * (BOARD_SIZE - 1)) check(x + BOARD_SIZE);	  
-	}
-	for (var g of group) {  
-	  liberties[g] = l;
+    var l = 0;
+    var group = [pos];
+    var c = board[pos];
+    seen.fill(0);
+    seen[pos] = 1;
+    // hopefully this gets inlined? otherwise unroll it manually
+    for (var i = 0; i < group.length; ++i) {
+      var x = group[i];
+      if (x % BOARD_SIZE > 0) check(x - 1);
+      if ((x + 1) % BOARD_SIZE) check(x + 1);
+      if (x >= BOARD_SIZE) check(x - BOARD_SIZE);
+      if (x < BOARD_SIZE * (BOARD_SIZE - 1)) check(x + BOARD_SIZE);
+    }
+    for (var g of group) {
+      liberties[g] = l;
     }
   }
 }
@@ -356,11 +356,6 @@ function getTerritory(board) {
   return controlled;
 }
 
-/**
- * @param {Int8Array} board
- * @param {boolean} blackToPlay
- * @param {Set<number>} history
- */
 function fastPlayoutLinear(board, blackToPlay, history) {
   let ab = new ArrayBuffer(4 * BOARD_SIZE * BOARD_SIZE);
   let linearBoard = new Int8Array(ab, 0, BOARD_SIZE * BOARD_SIZE),
@@ -371,46 +366,53 @@ function fastPlayoutLinear(board, blackToPlay, history) {
   getLibertiesLinear(linearBoard, liberties);
   let lastPassed = false;
   let maxIters = 1.5 * BOARD_SIZE * BOARD_SIZE;
+  function check(idx) {
+    if (linearBoard[idx] == 0) {
+      legal = true;
+      fillsEye = false;
+    } else if (linearBoard[idx] > 0) {
+      if (blackToPlay ^ (linearBoard[idx] == 2)) {
+        if (liberties[idx] == 1) {
+          fillsEye = false;
+        } else {
+          legal = true;
+        }
+      } else {
+        fillsEye = false;
+        if (liberties[idx] == 1) {
+          legal = true;
+        }
+      }
+    }
+  }
+
   for (let i = 0; i < maxIters; ++i) {
     // pick a non-dumb move at random, defaulting to pass
     // (a move is dumb if it fills in an eye for no reason)
+    
+    // TODO: it's potentially better to use RAVE for the playout policy
     let moves = [];
-    for (let x = 0; x < BOARD_SIZE; ++x) {
-      for (let y = 0; y < BOARD_SIZE; ++y) {
-        if (board[BOARD_SIZE * x + y] != 0) continue;
-        let fillsEye = true;
-        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-          if (x + dx == -1 || x + dx == BOARD_SIZE || y + dy == -1 || y + dy == BOARD_SIZE) continue;
-          let off = BOARD_SIZE * (x + dx) + (y + dy);
-          if (liberties[off] == 1) {
-            fillsEye = false;
-          }
-          if (linearBoard[off] == 0) {
-            fillsEye = false; break;
-          }
-          if (linearBoard[off] == 2) {
-            if (blackToPlay) {
-              fillsEye = false; break;
-            }
-          }
-          if (linearBoard[off] == 1) {
-            if (!blackToPlay) {
-              fillsEye = false; break;
-            }
-          }
-        }
-        if (fillsEye) continue;
-        moves.push([x, y]);
-      }
+    for (let pos = 0; pos < BOARD_SIZE * BOARD_SIZE; ++pos) {
+      if (linearBoard[pos]) continue;
+      var legal = false;
+      var fillsEye = true;
+      if (pos % BOARD_SIZE > 0) check(pos-1);
+      if ((pos+1) % BOARD_SIZE) check(pos+1);
+	    if (pos >= BOARD_SIZE) check(pos - BOARD_SIZE);
+	    if (pos < BOARD_SIZE * (BOARD_SIZE - 1)) check(pos + BOARD_SIZE);
+      
+      if (legal && !fillsEye) moves.push(pos);
     }
+    
     while (moves.length) {
       // Pick a move at random
       let i = Math.floor(Math.random() * moves.length);
-      let [x, y] = moves[i];
+      let pos = moves[i];
 
-      let legal = addMoveLinear(linearBoard, nextBoard, liberties, x, y, blackToPlay);
+      let legal = addMoveLinear(linearBoard, nextBoard, liberties, (pos/BOARD_SIZE)|0, (pos%BOARD_SIZE), blackToPlay);
       if (!legal) {
         moves.splice(i, 1);
+        console.error('illegal move attempted in fastPlayoutLinear');
         continue;
       }
       let hash = zobristHashLinear(nextBoard, false);
@@ -418,17 +420,30 @@ function fastPlayoutLinear(board, blackToPlay, history) {
         moves.splice(i, 1);
         continue;
       }
-      if (nextLiberties[BOARD_SIZE * x + y] == 1) {
+      if (nextLiberties[pos] == 1) {
         // it's okay to either sac a lone stone or extend from
         // a stone that was already in atari (many eye destruction
         // tactics look like that), but killing a group that wasn't under
         // atari is silly
         let alreadyDying = true;
-        for (let [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
-          if (x + dx == -1 || x + dx == BOARD_SIZE || y + dy == -1 || y + dy == BOARD_SIZE) continue;
-          let off = BOARD_SIZE * (x + dx) + (y + dy);
-          if (board[off] == (blackToPlay ? 1 : 2) && liberties[off] > 1) {
-            alreadyDying = false; break;
+        if (pos % BOARD_SIZE > 0) {
+          if (board[pos-1] == (blackToPlay ? 1 : 2) && (liberties[pos-1] > 1)) {
+            alreadyDying = false;
+          }
+        }
+        if ((pos+1) % BOARD_SIZE) {
+          if (board[pos+1] == (blackToPlay ? 1 : 2) && (liberties[pos+1] > 1)) {
+            alreadyDying = false;
+          }
+        }
+	    if (pos >= BOARD_SIZE) {
+          if (board[pos-BOARD_SIZE] == (blackToPlay ? 1 : 2) && (liberties[pos-BOARD_SIZE] > 1)) {
+            alreadyDying = false;
+          }
+        }
+	    if (pos < BOARD_SIZE * (BOARD_SIZE - 1)) {
+          if (board[pos+BOARD_SIZE] == (blackToPlay ? 1 : 2) && (liberties[pos+BOARD_SIZE] > 1)) {
+            alreadyDying = false;
           }
         }
         if (!alreadyDying) {
@@ -818,7 +833,7 @@ function getMoves(board, lp, seen_hashes = []) {
       nh[5] ??= map.get(nh[0]);
       if (nh[5]) {
         if (SUPPRESS_TRANSPOSITION) {
-          if (nh[1] <= nh[5].N) { 
+          if (nh[1] <= nh[5].N) {
             break;
           }
         }
