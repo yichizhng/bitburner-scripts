@@ -19,8 +19,24 @@ class WHRNG {
   }
 }
 
+function trustMeBro(elem) {
+  for (let p in elem) {
+    if (p.startsWith('__reactProps')) {
+  	  elem[p].onClick({isTrusted: true});
+	  }
+  }
+}
+
 /** @param {NS} ns */
 export async function main(ns) {
+  ns.disableLog('asleep')
+  ns.clearLog();
+  let d = globalThis['document'];
+  if (d.querySelector('input[placeholder="Amount to play"]')) {
+    ns.print('please start the script OUTSIDE of roulette and then enter');
+    ns.exit();
+  }
+  ns.print('waiting for player to enter casino...')
   let t = new Date().getTime(); 
   let rng = new WHRNG(t);
   let spin = () => Math.floor(rng.random() * 37)
@@ -29,10 +45,33 @@ export async function main(ns) {
   Date.prototype.getTime = function() {
     return t;
   }
-  ns.print('kill this script after you enter roulette')
-  ns.print('predicted roulette spins: ' + spins);
+  let r = Math.random;
   ns.atExit(() => {
     Date.prototype.getTime = o;
+    Math.random = r;
   });
-  return new Promise(() => 0);
+  while (true) {
+    if (d.querySelector('input[placeholder="Amount to play"]')) break;
+    await ns.asleep(0);
+  }
+  let input = d.querySelector('input[placeholder="Amount to play"]');
+  Object.getOwnPropertyDescriptor(eval('window').HTMLInputElement.prototype, "value").set.call(input, '10000000')
+  input.dispatchEvent(new Event('input', {bubbles: true}))
+  await ns.asleep(0);
+  // Gather up the buttons for later
+  let deez = [];
+  let buttons = d.querySelectorAll('button');
+  for (let button of buttons) {
+    if (button.innerText == +button.innerText) {
+      deez[button.innerText] = button;
+    }
+  }
+  
+  Math.random = function() {
+    return 0.9 * r();
+  }
+  for (let i = 0; i < 28; ++i) {
+    trustMeBro(deez[spins[i]]);
+  }
+  await ns.asleep(2000);
 }
