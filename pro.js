@@ -384,10 +384,10 @@ export async function main(ns) {
     'export let main = (n,a=n.args[0]) => (n.disableLog("ALL"), (a && n.weaken(a)))', 'w');
   const scripts = ['hack-once.js', 'hack-half.js', 'grow-once.js', 'weaken-once.js']
   // Force module compilation
-  let pids = [ns.exec(scripts[0],ns.hostname),
-              ns.exec(scripts[1],ns.hostname),
-              ns.exec(scripts[2],ns.hostname),
-              ns.exec(scripts[3],ns.hostname)];
+  let pids = [ns.exec(scripts[0],ns.getHostname()),
+              ns.exec(scripts[1],ns.getHostname()),
+              ns.exec(scripts[2],ns.getHostname()),
+              ns.exec(scripts[3],ns.getHostname())];
   for (let pid of pids) {
     while (ns.isRunning(pid)) await ns.sleep(0);
   }
@@ -566,13 +566,13 @@ export async function main(ns) {
         * ns.formulas.hacking.hackExp(so, po)
         + (ht * (1 - ns.formulas.hacking.hackChance(so, po)) * ns.formulas.hacking.hackExp(so, po) / 4);
     }
-    ns.print(`Expected profit: \$${ns.formatNumber(expected_profit)}`);
+    ns.print(`Expected profit: \$${ns.format.number(expected_profit)}`);
     let sm = ns.getRunningScript().onlineMoneyMade;
     await w; await ns.asleep(ns.getWeakenTime(target));
     let em = ns.getRunningScript().onlineMoneyMade;
     let cycleEndTime = Date.now();
-    ns.print(`Actual profit: \$${ns.formatNumber(em - sm)}`);
-    ns.print(`Money rate: \$${ns.formatNumber(1000 * (em - sm) / (cycleEndTime - cycleStartTime))}/s`);
+    ns.print(`Actual profit: \$${ns.format.number(em - sm)}`);
+    ns.print(`Money rate: \$${ns.format.number(1000 * (em - sm) / (cycleEndTime - cycleStartTime))}/s`);
     server = ns.getServer(target);
     if (server.hackDifficulty > server.minDifficulty) {
       ns.print(`ERROR: Server above min diff ${server.hackDifficulty} / ${server.minDifficulty}`);
